@@ -1,7 +1,9 @@
 use chrono::{DateTime, Local, Utc};
-use serde::Deserialize;
 use std::path::Path;
 use std::process::Command;
+use std::time::Duration;
+
+use crate::history::{parse_atom_entries, read_cache, read_stale_cache, write_cache};
 
 #[derive(Debug, Clone)]
 pub struct SlsMoonStatus {
@@ -13,49 +15,45 @@ pub struct SlsMoonStatus {
     pub local_steamclient_sha: Option<String>,
 }
 
-#[derive(Deserialize)]
-struct GitHubCommit {
-    commit: CommitInner,
-}
-
-#[derive(Deserialize)]
-struct CommitInner {
-    author: CommitAuthor,
-}
-
-#[derive(Deserialize)]
-struct CommitAuthor {
-    date: String,
-}
-
 fn format_dt(dt: DateTime<Utc>) -> String {
     dt.with_timezone(&Local)
         .format("%Y-%m-%d %H:%M")
         .to_string()
 }
 
-fn fetch_latest_commit_date(repo: &str, path: Option<&str>) -> Result<DateTime<Utc>, String> {
-    let mut url = format!("https://api.github.com/repos/{repo}/commits?per_page=1");
-    if let Some(p) = path {
-        url.push_str(&format!("&path={p}"));
-    }
+fn fetch_latest_atom_date(cache_key: &str, url: &str) -> Result<DateTime<Utc>, String> {
+    let ttl = Duration::from_secs(600);
+    let xml = if let Some(cached) = read_cache(cache_key, ttl) {
+        cached
+    } else {
+        match ureq::get(url)
+            .set("User-Agent", "SteamRollbackr/0.3")
+            .call()
+            .and_then(|r| r.into_string().map_err(ureq::Error::from))
+        {
+            Ok(body) => {
+                write_cache(cache_key, &body);
+                body
+            }
+            Err(e) => {
+                if let Some(stale) = read_stale_cache(cache_key) {
+                    stale
+                } else {
+                    return Err(format!("Failed to fetch {url}: {e}"));
+                }
+            }
+        }
+    };
 
-    let commits: Vec<GitHubCommit> = ureq::get(&url)
-        .set("User-Agent", "SteamRollbackr/0.1")
-        .set("Accept", "application/vnd.github+json")
-        .call()
-        .map_err(|e| format!("Failed to query {repo}: {e}"))?
-        .into_json()
-        .map_err(|e| format!("Failed to parse commits for {repo}: {e}"))?;
-
-    let first = commits
+    let entries = parse_atom_entries(&xml);
+    let first = entries
         .into_iter()
         .next()
-        .ok_or_else(|| format!("No commits found for {repo}"))?;
+        .ok_or_else(|| format!("No entries found in {url}"))?;
 
-    DateTime::parse_from_rfc3339(&first.commit.author.date)
+    DateTime::parse_from_rfc3339(&first.1)
         .map(|d| d.with_timezone(&Utc))
-        .map_err(|e| format!("Invalid date from {repo}: {e}"))
+        .map_err(|e| format!("Invalid date in {url}: {e}"))
 }
 
 fn compute_sha256(path: &Path) -> Option<String> {
@@ -72,17 +70,26 @@ fn check_pattern_exists(sha256: &str) -> bool {
         "https://raw.githubusercontent.com/swwayps/steam-monitor/main/linux32/steamclient/{sha256}.toml"
     );
     ureq::head(&url)
-        .set("User-Agent", "SteamRollbackr/0.1")
+        .set("User-Agent", "SteamRollbackr/0.3")
         .call()
         .map(|r| r.status() == 200)
         .unwrap_or(false)
 }
 
 pub fn check_slsteam_moon(steam_dir: Option<&Path>) -> Result<SlsMoonStatus, String> {
-    let monitor_date = fetch_latest_commit_date("swwayps/steam-monitor", None)?;
-    let moon_date = fetch_latest_commit_date("swwayps/slsteam-moon", None)?;
-    let latest_steam_date =
-        fetch_latest_commit_date("SteamTracking/SteamTracking", Some("ClientManifest/steam_client_steamrt64")).ok();
+    let monitor_date = fetch_latest_atom_date(
+        "steam_monitor_atom.xml",
+        "https://github.com/swwayps/steam-monitor/commits/HEAD.atom",
+    )?;
+    let moon_date = fetch_latest_atom_date(
+        "slsteam_moon_atom.xml",
+        "https://github.com/swwayps/slsteam-moon/commits/HEAD.atom",
+    )?;
+    let latest_steam_date = fetch_latest_atom_date(
+        "releases_steamrt64_atom.xml",
+        "https://github.com/SteamTracking/SteamTracking/commits/HEAD/ClientManifest/steam_client_steamrt64.atom",
+    )
+    .ok();
 
     let newest_pattern_update = monitor_date.max(moon_date);
     let updated_for_latest_steam = latest_steam_date.map(|st| newest_pattern_update >= st);

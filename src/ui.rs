@@ -224,6 +224,10 @@ impl SteamRollbackrApp {
                 }
                 BgEvent::SlsMoonChecked(res) => {
                     self.checking_moon = false;
+                    if let Err(ref e) = res {
+                        self.initial_ready_only = false;
+                        self.logs.push(format!("slsteam-moon check failed: {e}"));
+                    }
                     self.moon_status = Some(res);
                 }
                 BgEvent::Log(msg) => {
@@ -413,9 +417,10 @@ impl eframe::App for SteamRollbackrApp {
                             }
                             Some(Err(e)) => {
                                 ui.label(
-                                    RichText::new(format!("{} ({e})", t.check_failed))
+                                    RichText::new(t.check_failed)
                                         .color(Color32::LIGHT_RED),
-                                );
+                                )
+                                .on_hover_text(e);
                             }
                             None => {
                                 ui.label(t.not_checked_yet);
