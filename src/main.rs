@@ -1,4 +1,5 @@
 mod history;
+mod i18n;
 mod server;
 mod slssteam;
 mod steam;

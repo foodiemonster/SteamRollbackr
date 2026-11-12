@@ -1,8 +1,9 @@
-use eframe::egui::{self, Color32, RichText};
+use eframe::egui::{self, Color32, PopupCloseBehavior, RichText};
 use std::sync::mpsc::{self, Receiver};
 use std::thread;
 
 use crate::history::{fetch_manifest_content, fetch_releases, ReleaseEntry};
+use crate::i18n::{draw_flag, texts, Language};
 use crate::slssteam::{check_slsteam_moon, SlsMoonStatus};
 use crate::steam::{
     inspect_steam, lock_only, rollback_to_manifest, unlock_updates, LockState, ManifestChannel,
@@ -21,6 +22,7 @@ enum BgEvent {
 }
 
 pub struct SteamRollbackrApp {
+    lang: Language,
     status: SteamStatus,
     channel: ManifestChannel,
     releases: Vec<ReleaseEntry>,
@@ -34,6 +36,7 @@ pub struct SteamRollbackrApp {
     busy: bool,
     filter_text: String,
     logs: Vec<String>,
+    initial_ready_only: bool,
     rx: Receiver<BgEvent>,
     tx: mpsc::Sender<BgEvent>,
 }
@@ -48,7 +51,11 @@ impl SteamRollbackrApp {
             .map(|v| v.channel)
             .unwrap_or(ManifestChannel::SteamRt64);
 
+        let lang = Language::En;
+        let t = texts(lang);
+
         let mut app = Self {
+            lang,
             status,
             channel: default_channel,
             releases: Vec::new(),
@@ -61,13 +68,21 @@ impl SteamRollbackrApp {
             moon_status: None,
             busy: false,
             filter_text: String::new(),
-            logs: vec!["Ready. Select a release and click Rollback & Lock.".to_string()],
+            logs: vec![t.ready_log.to_string()],
+            initial_ready_only: true,
             rx,
             tx,
         };
         app.load_releases(1, true);
         app.check_moon();
         app
+    }
+
+    fn set_language(&mut self, new_lang: Language) {
+        self.lang = new_lang;
+        if self.initial_ready_only && self.logs.len() == 1 {
+            self.logs[0] = texts(new_lang).ready_log.to_string();
+        }
     }
 
     fn refresh_status(&mut self) {
@@ -112,15 +127,18 @@ impl SteamRollbackrApp {
 
     fn start_rollback(&mut self) {
         let Some(steam_dir) = self.status.steam_dir.clone() else {
+            self.initial_ready_only = false;
             self.logs.push("Error: Steam directory not found.".to_string());
             return;
         };
         let Some(idx) = self.selected_idx else {
+            self.initial_ready_only = false;
             self.logs.push("Error: Please select a release first.".to_string());
             return;
         };
         let entry = self.releases[idx].clone();
         self.busy = true;
+        self.initial_ready_only = false;
         self.logs.clear();
         self.logs.push(format!(
             "Fetching manifest for {} ({})...",
@@ -150,6 +168,7 @@ impl SteamRollbackrApp {
             return;
         };
         self.busy = true;
+        self.initial_ready_only = false;
         self.logs.clear();
         let tx = self.tx.clone();
         thread::spawn(move || {
@@ -166,6 +185,7 @@ impl SteamRollbackrApp {
             return;
         };
         self.busy = true;
+        self.initial_ready_only = false;
         self.logs.clear();
         let tx = self.tx.clone();
         thread::spawn(move || {
@@ -196,6 +216,7 @@ impl SteamRollbackrApp {
                                 self.releases.extend(list);
                             }
                             Err(e) => {
+                                self.initial_ready_only = false;
                                 self.logs.push(format!("Failed to load releases: {e}"));
                             }
                         }
@@ -206,11 +227,13 @@ impl SteamRollbackrApp {
                     self.moon_status = Some(res);
                 }
                 BgEvent::Log(msg) => {
+                    self.initial_ready_only = false;
                     self.logs.push(msg);
                 }
                 BgEvent::ActionFinished(res) => {
                     self.busy = false;
                     if let Err(e) = res {
+                        self.initial_ready_only = false;
                         self.logs.push(format!("ERROR: {e}"));
                     }
                     self.refresh_status();
@@ -228,43 +251,80 @@ impl eframe::App for SteamRollbackrApp {
             ctx.request_repaint_after(std::time::Duration::from_millis(100));
         }
 
+        let t = texts(self.lang);
+
         egui::TopBottomPanel::top("header_panel").show(ctx, |ui| {
             ui.add_space(4.0);
             ui.horizontal(|ui| {
                 ui.heading("SteamRollbackr");
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                    if ui.button("Refresh Status").clicked() && !self.busy {
-                        self.refresh_status();
-                        self.check_moon();
+                    let popup_id = ui.make_persistent_id("lang_dropdown_popup");
+                    let flag_size = egui::vec2(24.0, 16.0);
+                    let (rect, resp) = ui.allocate_exact_size(flag_size, egui::Sense::click());
+                    draw_flag(ui.painter(), rect, self.lang);
+                    let resp = resp.on_hover_text(self.lang.name());
+                    if resp.clicked() {
+                        ui.memory_mut(|mem| mem.toggle_popup(popup_id));
                     }
+
+                    egui::popup_below_widget(
+                        ui,
+                        popup_id,
+                        &resp,
+                        PopupCloseBehavior::CloseOnClick,
+                        |ui| {
+                            ui.set_min_width(120.0);
+                            for lang_opt in Language::all() {
+                                if lang_opt == self.lang {
+                                    continue;
+                                }
+                                ui.horizontal(|ui| {
+                                    let (r, flag_resp) =
+                                        ui.allocate_exact_size(egui::vec2(22.0, 14.0), egui::Sense::click());
+                                    draw_flag(ui.painter(), r, lang_opt);
+                                    let btn_resp = ui.selectable_label(false, lang_opt.name());
+                                    if flag_resp.clicked() || btn_resp.clicked() {
+                                        self.set_language(lang_opt);
+                                    }
+                                });
+                            }
+                        },
+                    );
                 });
             });
             ui.add_space(6.0);
 
-            // Status Card
+            // Status Card (Refresh Status moved inside top-right of this box)
             egui::Frame::group(ui.style()).show(ui, |ui| {
                 ui.set_width(ui.available_width());
-                match &self.status.steam_dir {
-                    Some(dir) => {
-                        ui.horizontal(|ui| {
-                            ui.label(RichText::new("Steam Path:").strong());
+                ui.horizontal(|ui| {
+                    match &self.status.steam_dir {
+                        Some(dir) => {
+                            ui.label(RichText::new(t.steam_path).strong());
                             ui.monospace(dir.display().to_string());
                             if self.status.is_flatpak {
                                 ui.label(RichText::new("[Flatpak]").color(Color32::LIGHT_BLUE));
                             }
-                        });
+                        }
+                        None => {
+                            ui.label(
+                                RichText::new(t.steam_not_found)
+                                    .color(Color32::RED)
+                                    .strong(),
+                            );
+                        }
                     }
-                    None => {
-                        ui.label(
-                            RichText::new("Steam installation not found!")
-                                .color(Color32::RED)
-                                .strong(),
-                        );
-                    }
-                }
+
+                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                        if ui.button(t.refresh_status).clicked() && !self.busy {
+                            self.refresh_status();
+                            self.check_moon();
+                        }
+                    });
+                });
 
                 ui.horizontal(|ui| {
-                    ui.label(RichText::new("Current Version:").strong());
+                    ui.label(RichText::new(t.current_version).strong());
                     match &self.status.current_version {
                         Some(v) => {
                             ui.label(format!(
@@ -275,24 +335,24 @@ impl eframe::App for SteamRollbackrApp {
                             ));
                         }
                         None => {
-                            ui.label("Unknown (no local client manifest found)");
+                            ui.label(t.unknown_version);
                         }
                     }
                 });
 
                 ui.horizontal(|ui| {
-                    ui.label(RichText::new("Update Lock Status:").strong());
+                    ui.label(RichText::new(t.update_lock_status).strong());
                     let (text, color) = match &self.status.lock_state {
                         LockState::Locked => (
-                            "LOCKED (Updates Blocked)".to_string(),
+                            t.locked.to_string(),
                             Color32::from_rgb(80, 200, 120),
                         ),
                         LockState::PartiallyLocked(reason) => (
-                            format!("PARTIALLY LOCKED ({reason})"),
+                            format!("{} ({reason})", t.partially_locked),
                             Color32::YELLOW,
                         ),
                         LockState::Unlocked => (
-                            "UNLOCKED (Updates Allowed)".to_string(),
+                            t.unlocked.to_string(),
                             Color32::from_rgb(240, 100, 100),
                         ),
                     };
@@ -303,38 +363,39 @@ impl eframe::App for SteamRollbackrApp {
                     ui.label(RichText::new("slsteam-moon:").strong());
                     if self.checking_moon {
                         ui.spinner();
-                        ui.label("Checking steam-monitor & slsteam-moon...");
+                        ui.label(t.checking_moon);
                     } else {
                         match &self.moon_status {
                             Some(Ok(st)) => {
                                 match st.updated_for_latest_steam {
                                     Some(true) => {
                                         ui.label(
-                                            RichText::new("Updated for latest Steam")
+                                            RichText::new(t.moon_updated)
                                                 .color(Color32::from_rgb(80, 200, 120))
                                                 .strong(),
                                         );
                                     }
                                     Some(false) => {
                                         ui.label(
-                                            RichText::new("NOT yet updated for latest Steam")
+                                            RichText::new(t.moon_not_updated)
                                                 .color(Color32::YELLOW)
                                                 .strong(),
                                         );
                                     }
                                     None => {
-                                        ui.label("Pattern update check incomplete");
+                                        ui.label(t.moon_incomplete);
                                     }
                                 }
                                 if let Some(supported) = st.local_pattern_supported {
                                     let (p_txt, p_col) = if supported {
-                                        ("Local client: Pattern OK", Color32::from_rgb(80, 200, 120))
+                                        (t.local_pattern_ok, Color32::from_rgb(80, 200, 120))
                                     } else {
-                                        ("Local client: No pattern", Color32::from_rgb(240, 100, 100))
+                                        (t.local_pattern_missing, Color32::from_rgb(240, 100, 100))
                                     };
                                     ui.label(RichText::new(format!("|  {p_txt}")).color(p_col));
                                 }
-                                if ui.small_button("Details").clicked() {
+                                if ui.small_button(t.details_btn).clicked() {
+                                    self.initial_ready_only = false;
                                     let mut lines = vec![
                                         format!("steam-monitor last update: {}", st.monitor_display),
                                         format!("slsteam-moon last commit: {}", st.moon_display),
@@ -352,12 +413,12 @@ impl eframe::App for SteamRollbackrApp {
                             }
                             Some(Err(e)) => {
                                 ui.label(
-                                    RichText::new(format!("Check failed ({e})"))
+                                    RichText::new(format!("{} ({e})", t.check_failed))
                                         .color(Color32::LIGHT_RED),
                                 );
                             }
                             None => {
-                                ui.label("Not checked yet");
+                                ui.label(t.not_checked_yet);
                             }
                         }
                     }
@@ -368,13 +429,13 @@ impl eframe::App for SteamRollbackrApp {
 
             // Channel & Recommendation Bar
             ui.horizontal(|ui| {
-                ui.label(RichText::new("Channel:").strong());
+                ui.label(RichText::new(t.channel).strong());
                 let mut changed = false;
-                for ch in [ManifestChannel::SteamRt64, ManifestChannel::Ubuntu12] {
-                    if ui
-                        .selectable_value(&mut self.channel, ch, ch.label())
-                        .changed()
-                    {
+                for (ch, label) in [
+                    (ManifestChannel::SteamRt64, t.channel_steamrt64),
+                    (ManifestChannel::Ubuntu12, t.channel_ubuntu12),
+                ] {
+                    if ui.selectable_value(&mut self.channel, ch, label).changed() {
                         changed = true;
                     }
                 }
@@ -384,24 +445,19 @@ impl eframe::App for SteamRollbackrApp {
             });
 
             let rec_msg = match self.status.current_version.as_ref().map(|v| v.channel) {
-                Some(ManifestChannel::Ubuntu12) => {
-                    "Tip: Your Steam currently uses ubuntu12 (Legacy). Use steamrt64 (64-bit / Recommended) for current builds, or ubuntu12 for pre-Nov 2026 builds."
-                }
-                _ => {
-                    "Tip: steamrt64 (64-bit / Recommended) is the active branch for modern 64-bit Linux. Use ubuntu12 only for legacy pre-Nov 2026 builds."
-                }
+                Some(ManifestChannel::Ubuntu12) => t.tip_ubuntu12_active,
+                _ => t.tip_steamrt64_rec,
             };
             ui.label(RichText::new(rec_msg).small().color(Color32::LIGHT_GRAY));
 
             ui.add_space(4.0);
 
             ui.horizontal(|ui| {
-                ui.label("Filter:");
+                ui.label(t.filter);
                 ui.add(
-                    egui::TextEdit::singleline(&mut self.filter_text)
-                        .hint_text("Search by date, SHA, or message..."),
+                    egui::TextEdit::singleline(&mut self.filter_text).hint_text(t.filter_hint),
                 );
-                if ui.button("Reload List").clicked() && !self.loading_releases {
+                if ui.button(t.reload_list).clicked() && !self.loading_releases {
                     self.load_releases(1, true);
                 }
             });
@@ -418,21 +474,21 @@ impl eframe::App for SteamRollbackrApp {
                 let can_lock = has_steam && !self.busy;
 
                 if ui
-                    .add_enabled(can_rollback, egui::Button::new("Rollback & Lock Updates"))
+                    .add_enabled(can_rollback, egui::Button::new(t.rollback_and_lock))
                     .clicked()
                 {
                     self.start_rollback();
                 }
 
                 if ui
-                    .add_enabled(can_unlock, egui::Button::new("Unlock Updates"))
+                    .add_enabled(can_unlock, egui::Button::new(t.unlock_updates))
                     .clicked()
                 {
                     self.start_unlock();
                 }
 
                 if ui
-                    .add_enabled(can_lock, egui::Button::new("Lock Current Version"))
+                    .add_enabled(can_lock, egui::Button::new(t.lock_current))
                     .clicked()
                 {
                     self.start_lock_only();
@@ -440,14 +496,14 @@ impl eframe::App for SteamRollbackrApp {
 
                 if self.busy {
                     ui.spinner();
-                    ui.label("Working...");
+                    ui.label(t.working);
                 }
             });
 
             ui.add_space(6.0);
 
             // Log Output
-            ui.label(RichText::new("Activity Log:").strong());
+            ui.label(RichText::new(t.activity_log).strong());
             egui::Frame::group(ui.style()).show(ui, |ui| {
                 egui::ScrollArea::vertical()
                     .id_salt("activity_log_scroll")
@@ -464,7 +520,7 @@ impl eframe::App for SteamRollbackrApp {
         });
 
         egui::CentralPanel::default().show(ctx, |ui| {
-            ui.label(RichText::new("Available Previous Releases (Newest First):").strong());
+            ui.label(RichText::new(t.available_releases).strong());
             ui.add_space(4.0);
 
             egui::Frame::group(ui.style()).show(ui, |ui| {
@@ -485,15 +541,19 @@ impl eframe::App for SteamRollbackrApp {
                             }
                             let selected = self.selected_idx == Some(i);
                             let short_title = if i == 0 {
-                                format!("{}   (Latest)", entry.date_display)
+                                format!("{}   {}", entry.date_display, t.latest_badge)
                             } else {
                                 entry.date_display.clone()
                             };
                             let hover_details = format!(
-                                "Date: {}\nChannel: {}\nCommit: {}\nMessage: {}",
+                                "{}: {}\n{}: {}\n{}: {}\n{}: {}",
+                                t.date_label,
                                 entry.date_display,
+                                t.channel,
                                 entry.channel.suffix(),
+                                t.commit_sha_label,
                                 entry.sha,
+                                t.commit_msg_label,
                                 entry.message
                             );
 
@@ -512,11 +572,11 @@ impl eframe::App for SteamRollbackrApp {
                                     self.selected_idx = Some(i);
                                 }
 
-                                let info_btn = egui::Button::new("Info")
+                                let info_btn = egui::Button::new(t.info_btn)
                                     .min_size(egui::vec2(info_w, 28.0));
                                 if ui
                                     .add(info_btn)
-                                    .on_hover_text("View full release details")
+                                    .on_hover_text(t.info_hover)
                                     .clicked()
                                 {
                                     self.details_entry = Some(entry.clone());
@@ -528,10 +588,10 @@ impl eframe::App for SteamRollbackrApp {
                         if self.loading_releases {
                             ui.horizontal(|ui| {
                                 ui.spinner();
-                                ui.label("Loading releases from SteamTracking...");
+                                ui.label(t.loading_releases);
                             });
                         } else if self.has_more {
-                            if ui.button("Load Older Releases...").clicked() {
+                            if ui.button(t.load_older).clicked() {
                                 let next_page = self.current_page + 1;
                                 self.load_releases(next_page, false);
                             }
@@ -542,32 +602,32 @@ impl eframe::App for SteamRollbackrApp {
 
         if let Some(entry) = self.details_entry.clone() {
             let mut open = true;
-            egui::Window::new("Release Details")
+            egui::Window::new(t.release_details_title)
                 .open(&mut open)
                 .collapsible(false)
                 .resizable(false)
                 .show(ctx, |ui| {
                     ui.horizontal(|ui| {
-                        ui.label(RichText::new("Date:").strong());
+                        ui.label(RichText::new(t.date_label).strong());
                         ui.label(&entry.date_display);
                     });
                     ui.horizontal(|ui| {
-                        ui.label(RichText::new("Channel:").strong());
+                        ui.label(RichText::new(t.channel).strong());
                         ui.label(entry.channel.suffix());
                     });
                     ui.horizontal(|ui| {
-                        ui.label(RichText::new("Commit SHA:").strong());
+                        ui.label(RichText::new(t.commit_sha_label).strong());
                         ui.monospace(&entry.sha);
                     });
                     ui.add_space(4.0);
-                    ui.label(RichText::new("Commit Message:").strong());
+                    ui.label(RichText::new(t.commit_msg_label).strong());
                     ui.label(&entry.message);
                     ui.add_space(6.0);
                     let url = format!(
                         "https://github.com/SteamTracking/SteamTracking/commit/{}",
                         entry.sha
                     );
-                    ui.hyperlink_to("View commit on GitHub", url);
+                    ui.hyperlink_to(t.view_on_github, url);
                 });
             if !open {
                 self.details_entry = None;
@@ -575,4 +635,3 @@ impl eframe::App for SteamRollbackrApp {
         }
     }
 }
-

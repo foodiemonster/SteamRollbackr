@@ -5,11 +5,8 @@ use std::process::Command;
 
 #[derive(Debug, Clone)]
 pub struct SlsMoonStatus {
-    pub monitor_date: DateTime<Utc>,
     pub monitor_display: String,
-    pub moon_date: DateTime<Utc>,
     pub moon_display: String,
-    pub latest_steam_date: Option<DateTime<Utc>>,
     pub latest_steam_display: Option<String>,
     pub updated_for_latest_steam: Option<bool>,
     pub local_pattern_supported: Option<bool>,
@@ -108,11 +105,8 @@ pub fn check_slsteam_moon(steam_dir: Option<&Path>) -> Result<SlsMoonStatus, Str
     };
 
     Ok(SlsMoonStatus {
-        monitor_date,
         monitor_display: format_dt(monitor_date),
-        moon_date,
         moon_display: format_dt(moon_date),
-        latest_steam_date,
         latest_steam_display: latest_steam_date.map(format_dt),
         updated_for_latest_steam,
         local_pattern_supported,
