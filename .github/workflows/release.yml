@@ -19,6 +19,7 @@ jobs:
           mkdir -p dist
           cp target/release/steamrollbackr dist/
           cp packaging/steamrollbackr.desktop dist/
+          cp packaging/steamrollbackr.png dist/
           cp README.md dist/
           tar -czf steamrollbackr-linux-x86_64.tar.gz -C dist .
       - name: Upload Release Asset

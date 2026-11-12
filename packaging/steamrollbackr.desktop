@@ -2,7 +2,7 @@
 Name=SteamRollbackr
 Comment=Roll back the Steam Linux client and lock/unlock updates
 Exec=steamrollbackr
-Icon=steam
+Icon=steamrollbackr
 Terminal=false
 Type=Application
 Categories=Utility;Game;

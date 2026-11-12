@@ -23,6 +23,7 @@ modules:
     build-commands:
       - cargo build --release --offline
       - install -Dm755 target/release/steamrollbackr /app/bin/steamrollbackr
+      - install -Dm644 packaging/steamrollbackr.png /app/share/icons/hicolor/256x256/apps/steamrollbackr.png
       - install -Dm644 packaging/steamrollbackr.desktop /app/share/applications/io.github.foodiemonster.SteamRollbackr.desktop
     sources:
       - type: dir
