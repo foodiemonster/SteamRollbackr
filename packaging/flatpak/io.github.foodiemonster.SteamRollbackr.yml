@@ -1,0 +1,30 @@
+app-id: io.github.foodiemonster.SteamRollbackr
+runtime: org.freedesktop.Platform
+runtime-version: '24.08'
+sdk: org.freedesktop.Sdk
+sdk-extensions:
+  - org.freedesktop.Sdk.Extension.rust-stable
+command: steamrollbackr
+finish-args:
+  - --share=ipc
+  - --share=network
+  - --socket=wayland
+  - --socket=fallback-x11
+  - --device=dri
+  - --filesystem=home
+  - --talk-name=org.freedesktop.Flatpak
+modules:
+  - name: steamrollbackr
+    buildsystem: simple
+    build-options:
+      append-path: /usr/lib/sdk/rust-stable/bin
+      env:
+        CARGO_HOME: /run/build/steamrollbackr/cargo
+    build-commands:
+      - cargo build --release --offline
+      - install -Dm755 target/release/steamrollbackr /app/bin/steamrollbackr
+      - install -Dm644 packaging/steamrollbackr.desktop /app/share/applications/io.github.foodiemonster.SteamRollbackr.desktop
+    sources:
+      - type: dir
+        path: ../..
+

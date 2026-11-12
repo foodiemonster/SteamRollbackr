@@ -1,0 +1,10 @@
+[Desktop Entry]
+Name=SteamRollbackr
+Comment=Roll back the Steam Linux client and lock/unlock updates
+Exec=steamrollbackr
+Icon=steam
+Terminal=false
+Type=Application
+Categories=Utility;Game;
+Keywords=Steam;Rollback;Downgrade;Update;Lock;
+

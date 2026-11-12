@@ -1,0 +1,20 @@
+[package]
+name = "steam-rollbackr"
+version = "0.1.0"
+edition = "2021"
+description = "Cross-distro Linux GUI utility to roll back the Steam client and lock/unlock updates"
+license = "MIT"
+repository = "https://github.com/foodiemonster/SteamRollbackr"
+
+[[bin]]
+name = "steamrollbackr"
+path = "src/main.rs"
+
+[dependencies]
+chrono = { version = "0.4", features = ["serde"] }
+eframe = { version = "0.29", default-features = false, features = ["glow", "default_fonts", "wayland", "x11"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+tiny_http = "0.12"
+ureq = { version = "2", features = ["json"] }
+
