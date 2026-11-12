@@ -1,4 +1,6 @@
 /target
+/dist
+*.tar.gz
 Cargo.lock
 *.flatpak
 .flatpak-builder/
