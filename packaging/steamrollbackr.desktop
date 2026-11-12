@@ -1,3 +1,4 @@
+#!/usr/bin/env xdg-open
 [Desktop Entry]
 Name=SteamRollbackr
 Comment=Roll back the Steam Linux client and lock/unlock updates
@@ -5,6 +6,6 @@ Exec=steamrollbackr
 Icon=steamrollbackr
 Terminal=false
 Type=Application
-Categories=Utility;Game;
+Categories=Utility;
 Keywords=Steam;Rollback;Downgrade;Update;Lock;
 
