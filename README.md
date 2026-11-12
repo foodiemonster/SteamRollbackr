@@ -1,28 +1,56 @@
 # SteamRollbackr
 
-A lightweight, distro-agnostic Linux GUI utility to inspect your Steam client version, browse historical Steam client releases, roll back to a specific version, and lock or unlock automatic Steam updates.
+A Linux desktop tool to roll back the Steam client to an earlier version and lock or unlock automatic updates.
 
-Works across **Bazzite**, **SteamOS**, **Linux Mint**, **Ubuntu**, **Fedora**, **Arch**, and **Flatpak Steam** installations.
+Works on most Linux distributions (Bazzite, SteamOS, Mint, Ubuntu, Fedora, Arch) and supports both native and Flatpak Steam installations.
 
-## Features
+## What It Does
 
-- **Distro-Agnostic Detection**: Automatically locates Steam across `~/.local/share/Steam`, `~/.steam/steam`, `~/.steam/root`, and Flatpak (`~/.var/app/com.valvesoftware.Steam/.local/share/Steam`).
-- **Version & Lock Status**: Displays the currently installed Steam client build ID & timestamp, plus whether updates are **Locked**, **Partially Locked**, or **Unlocked**.
-- **Release History Browser**: Fetches historical `steam_client_steamrt64` and `steam_client_ubuntu12` manifests from [SteamTracking](https://github.com/SteamTracking/SteamTracking) sorted newest-first, with search filtering.
-- **One-Click Rollback & Lock**:
-  - Serves the chosen manifest locally via `-overridepackageurl` while redirecting package downloads to Valve's CDN.
-  - Cleans conflicting manifests and `slsteam-moon` safe-mode state.
-  - Locks updates via `Steam.cfg` / `steam.cfg` (`BootStrapperInhibitAll=enable`, `BootStrapperInhibitUpdateOnLaunch=enable`, `BootStrapperForceSelfUpdate=false`) and `chmod a-w package/`.
-- **One-Click Unlock**: Restores write permissions on `package/` and removes `Steam.cfg` / `steam.cfg` so Steam can update normally.
+- Detects your Steam installation and shows the currently installed client version.
+- Shows whether automatic updates are currently locked or unlocked.
+- Lists previous Steam client releases (newest first) from [SteamTracking](https://github.com/SteamTracking/SteamTracking).
+- Rolls back Steam to the selected release and locks updates using `Steam.cfg` / `steam.cfg` and read-only permissions on `package/`.
+- Unlocks updates when you want Steam to update normally again.
 
-## Building from Source
+## Installation
+
+1. Download `steamrollbackr-linux-x86_64.tar.gz` from the [Releases](https://github.com/foodiemonster/SteamRollbackr/releases) page.
+2. Extract and run the installer:
+
+```bash
+tar -xzf steamrollbackr-linux-x86_64.tar.gz
+./install.sh
+```
+
+This installs the binary to `~/.local/bin/steamrollbackr`, the icon to `~/.local/share/icons/hicolor/256x256/apps/steamrollbackr.png`, and the desktop entry to `~/.local/share/applications/steamrollbackr.desktop`.
+
+### Building from Source
 
 ```bash
 cargo build --release
-./target/release/steamrollbackr
+./install.sh
 ```
+
+## Usage
+
+1. Open **SteamRollbackr** from your application menu (or run `~/.local/bin/steamrollbackr`).
+2. Select a channel:
+   - `steamrt64` (recommended for modern 64-bit Linux systems)
+   - `ubuntu12` (legacy pre-November 2026 builds)
+3. Pick a release from the list and click **Rollback & Lock Updates**.
+4. To allow Steam to update again later, click **Unlock Updates**.
+5. To lock your current version without rolling back, click **Lock Current Version**.
+
+## Uninstall
+
+```bash
+rm -f ~/.local/bin/steamrollbackr \
+      ~/.local/share/applications/steamrollbackr.desktop \
+      ~/.local/share/icons/hicolor/256x256/apps/steamrollbackr.png
+```
+
+If Steam updates are still locked and you want to re-enable them, click **Unlock Updates** before uninstalling (or run `chmod u+w` on your Steam `package/` folder and remove `Steam.cfg` and `steam.cfg`).
 
 ## License
 
 MIT
-
