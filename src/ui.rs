@@ -201,7 +201,8 @@ impl eframe::App for SteamRollbackrApp {
             ctx.request_repaint_after(std::time::Duration::from_millis(100));
         }
 
-        egui::CentralPanel::default().show(ctx, |ui| {
+        egui::TopBottomPanel::top("header_panel").show(ctx, |ui| {
+            ui.add_space(4.0);
             ui.horizontal(|ui| {
                 ui.heading("SteamRollbackr");
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
@@ -254,27 +255,28 @@ impl eframe::App for SteamRollbackrApp {
                 ui.horizontal(|ui| {
                     ui.label(RichText::new("Update Lock Status:").strong());
                     let (text, color) = match &self.status.lock_state {
-                        LockState::Locked => ("LOCKED (Updates Blocked)", Color32::from_rgb(80, 200, 120)),
-                        LockState::PartiallyLocked(reason) => {
-                            return {
-                                ui.label(
-                                    RichText::new(format!("PARTIALLY LOCKED ({reason})"))
-                                        .color(Color32::YELLOW)
-                                        .strong(),
-                                );
-                            };
-                        }
-                        LockState::Unlocked => ("UNLOCKED (Updates Allowed)", Color32::from_rgb(240, 100, 100)),
+                        LockState::Locked => (
+                            "LOCKED (Updates Blocked)".to_string(),
+                            Color32::from_rgb(80, 200, 120),
+                        ),
+                        LockState::PartiallyLocked(reason) => (
+                            format!("PARTIALLY LOCKED ({reason})"),
+                            Color32::YELLOW,
+                        ),
+                        LockState::Unlocked => (
+                            "UNLOCKED (Updates Allowed)".to_string(),
+                            Color32::from_rgb(240, 100, 100),
+                        ),
                     };
                     ui.label(RichText::new(text).color(color).strong());
                 });
             });
 
-            ui.add_space(8.0);
+            ui.add_space(6.0);
 
-            // Channel & Filter Bar
+            // Channel & Recommendation Bar
             ui.horizontal(|ui| {
-                ui.label("Channel:");
+                ui.label(RichText::new("Channel:").strong());
                 let mut changed = false;
                 for ch in [ManifestChannel::SteamRt64, ManifestChannel::Ubuntu12] {
                     if ui
@@ -289,6 +291,18 @@ impl eframe::App for SteamRollbackrApp {
                 }
             });
 
+            let rec_msg = match self.status.current_version.as_ref().map(|v| v.channel) {
+                Some(ManifestChannel::Ubuntu12) => {
+                    "Tip: Your Steam currently uses ubuntu12 (Legacy). Use steamrt64 (64-bit / Recommended) for current builds, or ubuntu12 for pre-Nov 2026 builds."
+                }
+                _ => {
+                    "Tip: steamrt64 (64-bit / Recommended) is the active branch for modern 64-bit Linux. Use ubuntu12 only for legacy pre-Nov 2026 builds."
+                }
+            };
+            ui.label(RichText::new(rec_msg).small().color(Color32::LIGHT_GRAY));
+
+            ui.add_space(4.0);
+
             ui.horizontal(|ui| {
                 ui.label("Filter:");
                 ui.add(
@@ -299,52 +313,11 @@ impl eframe::App for SteamRollbackrApp {
                     self.load_releases(1, true);
                 }
             });
+            ui.add_space(4.0);
+        });
 
+        egui::TopBottomPanel::bottom("footer_panel").show(ctx, |ui| {
             ui.add_space(6.0);
-
-            // Release List (Newest on top)
-            ui.label(RichText::new("Available Previous Releases (Newest First):").strong());
-            let list_height = (ui.available_height() - 175.0).max(150.0);
-            egui::Frame::group(ui.style()).show(ui, |ui| {
-                egui::ScrollArea::vertical()
-                    .max_height(list_height)
-                    .auto_shrink([false, false])
-                    .show(ui, |ui| {
-                        let query = self.filter_text.to_lowercase();
-                        for (i, entry) in self.releases.iter().enumerate() {
-                            if !query.is_empty()
-                                && !entry.date_display.to_lowercase().contains(&query)
-                                && !entry.short_sha.to_lowercase().contains(&query)
-                                && !entry.message.to_lowercase().contains(&query)
-                            {
-                                continue;
-                            }
-                            let selected = self.selected_idx == Some(i);
-                            let label = format!(
-                                "{}  |  {}  |  {}",
-                                entry.date_display, entry.short_sha, entry.message
-                            );
-                            if ui.selectable_label(selected, label).clicked() && !self.busy {
-                                self.selected_idx = Some(i);
-                            }
-                        }
-
-                        if self.loading_releases {
-                            ui.horizontal(|ui| {
-                                ui.spinner();
-                                ui.label("Loading releases from SteamTracking...");
-                            });
-                        } else if self.has_more {
-                            if ui.button("Load Older Releases...").clicked() {
-                                let next_page = self.current_page + 1;
-                                self.load_releases(next_page, false);
-                            }
-                        }
-                    });
-            });
-
-            ui.add_space(8.0);
-
             // Action Buttons
             ui.horizontal(|ui| {
                 let has_steam = self.status.steam_dir.is_some();
@@ -385,12 +358,64 @@ impl eframe::App for SteamRollbackrApp {
             ui.label(RichText::new("Activity Log:").strong());
             egui::Frame::group(ui.style()).show(ui, |ui| {
                 egui::ScrollArea::vertical()
+                    .id_salt("activity_log_scroll")
                     .stick_to_bottom(true)
-                    .max_height(100.0)
+                    .max_height(95.0)
                     .auto_shrink([false, false])
                     .show(ui, |ui| {
                         for line in &self.logs {
                             ui.monospace(line);
+                        }
+                    });
+            });
+            ui.add_space(4.0);
+        });
+
+        egui::CentralPanel::default().show(ctx, |ui| {
+            ui.label(RichText::new("Available Previous Releases (Newest First):").strong());
+            ui.add_space(4.0);
+
+            egui::Frame::group(ui.style()).show(ui, |ui| {
+                egui::ScrollArea::vertical()
+                    .id_salt("release_list_scroll")
+                    .auto_shrink([false, false])
+                    .show(ui, |ui| {
+                        ui.spacing_mut().item_spacing.y = 4.0;
+                        let row_width = ui.available_width();
+                        let query = self.filter_text.to_lowercase();
+
+                        for (i, entry) in self.releases.iter().enumerate() {
+                            if !query.is_empty()
+                                && !entry.date_display.to_lowercase().contains(&query)
+                                && !entry.short_sha.to_lowercase().contains(&query)
+                                && !entry.message.to_lowercase().contains(&query)
+                            {
+                                continue;
+                            }
+                            let selected = self.selected_idx == Some(i);
+                            let label = format!(
+                                "  {}   |   {}   |   {}",
+                                entry.date_display, entry.short_sha, entry.message
+                            );
+                            let widget = egui::Button::new(label)
+                                .selected(selected)
+                                .min_size(egui::vec2(row_width, 28.0));
+                            if ui.add(widget).clicked() && !self.busy {
+                                self.selected_idx = Some(i);
+                            }
+                        }
+
+                        ui.add_space(4.0);
+                        if self.loading_releases {
+                            ui.horizontal(|ui| {
+                                ui.spinner();
+                                ui.label("Loading releases from SteamTracking...");
+                            });
+                        } else if self.has_more {
+                            if ui.button("Load Older Releases...").clicked() {
+                                let next_page = self.current_page + 1;
+                                self.load_releases(next_page, false);
+                            }
                         }
                     });
             });

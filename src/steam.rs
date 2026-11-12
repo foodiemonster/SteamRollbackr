@@ -32,7 +32,7 @@ impl ManifestChannel {
     pub fn label(self) -> &'static str {
         match self {
             ManifestChannel::Ubuntu12 => "ubuntu12 (Legacy / Pre-Nov 2026)",
-            ManifestChannel::SteamRt64 => "steamrt64 (64-bit / Current)",
+            ManifestChannel::SteamRt64 => "steamrt64 (64-bit / Recommended)",
         }
     }
 }
