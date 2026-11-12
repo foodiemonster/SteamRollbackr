@@ -4,6 +4,8 @@ A Linux desktop tool to roll back the Steam client to an earlier version and loc
 
 Works on most Linux distributions (Bazzite, SteamOS, Mint, Ubuntu, Fedora, Arch) and supports both native and Flatpak Steam installations.
 
+![SteamRollbackr](docs/screenshot.png)
+
 ## What It Does
 
 - Detects your Steam installation and shows the currently installed client version.
