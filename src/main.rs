@@ -1,5 +1,6 @@
 mod history;
 mod server;
+mod slssteam;
 mod steam;
 mod ui;
 

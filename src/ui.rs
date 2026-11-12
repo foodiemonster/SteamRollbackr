@@ -3,6 +3,7 @@ use std::sync::mpsc::{self, Receiver};
 use std::thread;
 
 use crate::history::{fetch_manifest_content, fetch_releases, ReleaseEntry};
+use crate::slssteam::{check_slsteam_moon, SlsMoonStatus};
 use crate::steam::{
     inspect_steam, lock_only, rollback_to_manifest, unlock_updates, LockState, ManifestChannel,
     SteamStatus,
@@ -14,6 +15,7 @@ enum BgEvent {
         page: u32,
         result: Result<Vec<ReleaseEntry>, String>,
     },
+    SlsMoonChecked(Result<SlsMoonStatus, String>),
     Log(String),
     ActionFinished(Result<(), String>),
 }
@@ -23,9 +25,12 @@ pub struct SteamRollbackrApp {
     channel: ManifestChannel,
     releases: Vec<ReleaseEntry>,
     selected_idx: Option<usize>,
+    details_entry: Option<ReleaseEntry>,
     current_page: u32,
     has_more: bool,
     loading_releases: bool,
+    checking_moon: bool,
+    moon_status: Option<Result<SlsMoonStatus, String>>,
     busy: bool,
     filter_text: String,
     logs: Vec<String>,
@@ -48,9 +53,12 @@ impl SteamRollbackrApp {
             channel: default_channel,
             releases: Vec::new(),
             selected_idx: None,
+            details_entry: None,
             current_page: 1,
             has_more: true,
             loading_releases: false,
+            checking_moon: false,
+            moon_status: None,
             busy: false,
             filter_text: String::new(),
             logs: vec!["Ready. Select a release and click Rollback & Lock.".to_string()],
@@ -58,11 +66,25 @@ impl SteamRollbackrApp {
             tx,
         };
         app.load_releases(1, true);
+        app.check_moon();
         app
     }
 
     fn refresh_status(&mut self) {
         self.status = inspect_steam();
+    }
+
+    fn check_moon(&mut self) {
+        if self.checking_moon {
+            return;
+        }
+        self.checking_moon = true;
+        let steam_dir = self.status.steam_dir.clone();
+        let tx = self.tx.clone();
+        thread::spawn(move || {
+            let res = check_slsteam_moon(steam_dir.as_deref());
+            let _ = tx.send(BgEvent::SlsMoonChecked(res));
+        });
     }
 
     fn load_releases(&mut self, page: u32, reset: bool) {
@@ -179,6 +201,10 @@ impl SteamRollbackrApp {
                         }
                     }
                 }
+                BgEvent::SlsMoonChecked(res) => {
+                    self.checking_moon = false;
+                    self.moon_status = Some(res);
+                }
                 BgEvent::Log(msg) => {
                     self.logs.push(msg);
                 }
@@ -188,6 +214,7 @@ impl SteamRollbackrApp {
                         self.logs.push(format!("ERROR: {e}"));
                     }
                     self.refresh_status();
+                    self.check_moon();
                 }
             }
         }
@@ -197,7 +224,7 @@ impl SteamRollbackrApp {
 impl eframe::App for SteamRollbackrApp {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
         self.poll_events();
-        if self.busy || self.loading_releases {
+        if self.busy || self.loading_releases || self.checking_moon {
             ctx.request_repaint_after(std::time::Duration::from_millis(100));
         }
 
@@ -208,6 +235,7 @@ impl eframe::App for SteamRollbackrApp {
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                     if ui.button("Refresh Status").clicked() && !self.busy {
                         self.refresh_status();
+                        self.check_moon();
                     }
                 });
             });
@@ -269,6 +297,70 @@ impl eframe::App for SteamRollbackrApp {
                         ),
                     };
                     ui.label(RichText::new(text).color(color).strong());
+                });
+
+                ui.horizontal(|ui| {
+                    ui.label(RichText::new("slsteam-moon:").strong());
+                    if self.checking_moon {
+                        ui.spinner();
+                        ui.label("Checking steam-monitor & slsteam-moon...");
+                    } else {
+                        match &self.moon_status {
+                            Some(Ok(st)) => {
+                                match st.updated_for_latest_steam {
+                                    Some(true) => {
+                                        ui.label(
+                                            RichText::new("Updated for latest Steam")
+                                                .color(Color32::from_rgb(80, 200, 120))
+                                                .strong(),
+                                        );
+                                    }
+                                    Some(false) => {
+                                        ui.label(
+                                            RichText::new("NOT yet updated for latest Steam")
+                                                .color(Color32::YELLOW)
+                                                .strong(),
+                                        );
+                                    }
+                                    None => {
+                                        ui.label("Pattern update check incomplete");
+                                    }
+                                }
+                                if let Some(supported) = st.local_pattern_supported {
+                                    let (p_txt, p_col) = if supported {
+                                        ("Local client: Pattern OK", Color32::from_rgb(80, 200, 120))
+                                    } else {
+                                        ("Local client: No pattern", Color32::from_rgb(240, 100, 100))
+                                    };
+                                    ui.label(RichText::new(format!("|  {p_txt}")).color(p_col));
+                                }
+                                if ui.small_button("Details").clicked() {
+                                    let mut lines = vec![
+                                        format!("steam-monitor last update: {}", st.monitor_display),
+                                        format!("slsteam-moon last commit: {}", st.moon_display),
+                                    ];
+                                    if let Some(sd) = &st.latest_steam_display {
+                                        lines.push(format!("Latest Steam Linux release: {sd}"));
+                                    }
+                                    if let Some(sha) = &st.local_steamclient_sha {
+                                        lines.push(format!("Local steamclient.so SHA256: {sha}"));
+                                    }
+                                    for l in lines {
+                                        self.logs.push(l);
+                                    }
+                                }
+                            }
+                            Some(Err(e)) => {
+                                ui.label(
+                                    RichText::new(format!("Check failed ({e})"))
+                                        .color(Color32::LIGHT_RED),
+                                );
+                            }
+                            None => {
+                                ui.label("Not checked yet");
+                            }
+                        }
+                    }
                 });
             });
 
@@ -381,7 +473,6 @@ impl eframe::App for SteamRollbackrApp {
                     .auto_shrink([false, false])
                     .show(ui, |ui| {
                         ui.spacing_mut().item_spacing.y = 4.0;
-                        let row_width = ui.available_width();
                         let query = self.filter_text.to_lowercase();
 
                         for (i, entry) in self.releases.iter().enumerate() {
@@ -393,16 +484,44 @@ impl eframe::App for SteamRollbackrApp {
                                 continue;
                             }
                             let selected = self.selected_idx == Some(i);
-                            let label = format!(
-                                "  {}   |   {}   |   {}",
-                                entry.date_display, entry.short_sha, entry.message
+                            let short_title = if i == 0 {
+                                format!("{}   (Latest)", entry.date_display)
+                            } else {
+                                entry.date_display.clone()
+                            };
+                            let hover_details = format!(
+                                "Date: {}\nChannel: {}\nCommit: {}\nMessage: {}",
+                                entry.date_display,
+                                entry.channel.suffix(),
+                                entry.sha,
+                                entry.message
                             );
-                            let widget = egui::Button::new(label)
-                                .selected(selected)
-                                .min_size(egui::vec2(row_width, 28.0));
-                            if ui.add(widget).clicked() && !self.busy {
-                                self.selected_idx = Some(i);
-                            }
+
+                            ui.horizontal(|ui| {
+                                let info_w = 56.0;
+                                let btn_w = (ui.available_width() - info_w - 8.0).max(120.0);
+                                let row_btn = egui::Button::new(short_title)
+                                    .selected(selected)
+                                    .min_size(egui::vec2(btn_w, 28.0));
+                                if ui
+                                    .add(row_btn)
+                                    .on_hover_text(&hover_details)
+                                    .clicked()
+                                    && !self.busy
+                                {
+                                    self.selected_idx = Some(i);
+                                }
+
+                                let info_btn = egui::Button::new("Info")
+                                    .min_size(egui::vec2(info_w, 28.0));
+                                if ui
+                                    .add(info_btn)
+                                    .on_hover_text("View full release details")
+                                    .clicked()
+                                {
+                                    self.details_entry = Some(entry.clone());
+                                }
+                            });
                         }
 
                         ui.add_space(4.0);
@@ -420,6 +539,40 @@ impl eframe::App for SteamRollbackrApp {
                     });
             });
         });
+
+        if let Some(entry) = self.details_entry.clone() {
+            let mut open = true;
+            egui::Window::new("Release Details")
+                .open(&mut open)
+                .collapsible(false)
+                .resizable(false)
+                .show(ctx, |ui| {
+                    ui.horizontal(|ui| {
+                        ui.label(RichText::new("Date:").strong());
+                        ui.label(&entry.date_display);
+                    });
+                    ui.horizontal(|ui| {
+                        ui.label(RichText::new("Channel:").strong());
+                        ui.label(entry.channel.suffix());
+                    });
+                    ui.horizontal(|ui| {
+                        ui.label(RichText::new("Commit SHA:").strong());
+                        ui.monospace(&entry.sha);
+                    });
+                    ui.add_space(4.0);
+                    ui.label(RichText::new("Commit Message:").strong());
+                    ui.label(&entry.message);
+                    ui.add_space(6.0);
+                    let url = format!(
+                        "https://github.com/SteamTracking/SteamTracking/commit/{}",
+                        entry.sha
+                    );
+                    ui.hyperlink_to("View commit on GitHub", url);
+                });
+            if !open {
+                self.details_entry = None;
+            }
+        }
     }
 }
 
