@@ -505,48 +505,58 @@ impl eframe::App for SteamRollbackrApp {
                 });
             });
 
-            ui.add_space(6.0);
+            ui.add_space(10.0);
 
-            // Big Magic Button above Channel line
+            // Compact Magic Button with sparkle + explainer text to its right
             let has_steam = self.status.steam_dir.is_some();
-            let magic_btn = egui::Button::new(
-                RichText::new(format!("    {}", t.optimize_btn))
-                    .size(15.0)
-                    .strong(),
-            )
-            .fill(Color32::from_rgb(38, 79, 120))
-            .min_size(egui::vec2(ui.available_width(), 34.0));
+            ui.horizontal(|ui| {
+                let magic_btn = egui::Button::new(
+                    RichText::new(format!("      {}  ", t.optimize_btn))
+                        .size(14.5)
+                        .strong(),
+                )
+                .fill(Color32::from_rgb(38, 79, 120))
+                .min_size(egui::vec2(150.0, 34.0));
 
-            let magic_resp = ui.add_enabled(has_steam && !self.busy, magic_btn);
-            // Draw crisp gold 4-point sparkle icon inside the Magic Button
-            let r = magic_resp.rect;
-            let cx = r.center().x - 56.0;
-            let cy = r.center().y;
-            let s = 8.0_f32;
-            let m = 2.6_f32;
-            let gold = Color32::from_rgb(255, 215, 80);
-            let pts_v = vec![
-                egui::pos2(cx, cy - s),
-                egui::pos2(cx + m, cy),
-                egui::pos2(cx, cy + s),
-                egui::pos2(cx - m, cy),
-            ];
-            let pts_h = vec![
-                egui::pos2(cx - s, cy),
-                egui::pos2(cx, cy - m),
-                egui::pos2(cx + s, cy),
-                egui::pos2(cx, cy + m),
-            ];
-            ui.painter()
-                .add(egui::Shape::convex_polygon(pts_v, gold, egui::Stroke::NONE));
-            ui.painter()
-                .add(egui::Shape::convex_polygon(pts_h, gold, egui::Stroke::NONE));
-            if magic_resp.clicked() {
-                self.start_optimize();
-            }
-            ui.label(RichText::new(t.optimize_hover).small().color(Color32::LIGHT_GRAY));
+                let magic_resp = ui.add_enabled(has_steam && !self.busy, magic_btn);
+                let r = magic_resp.rect;
+                let cx = r.left() + 18.0;
+                let cy = r.center().y;
+                let s = 7.5_f32;
+                let m = 2.4_f32;
+                let gold = Color32::from_rgb(255, 215, 80);
+                let pts_v = vec![
+                    egui::pos2(cx, cy - s),
+                    egui::pos2(cx + m, cy),
+                    egui::pos2(cx, cy + s),
+                    egui::pos2(cx - m, cy),
+                ];
+                let pts_h = vec![
+                    egui::pos2(cx - s, cy),
+                    egui::pos2(cx, cy - m),
+                    egui::pos2(cx + s, cy),
+                    egui::pos2(cx, cy + m),
+                ];
+                ui.painter()
+                    .add(egui::Shape::convex_polygon(pts_v, gold, egui::Stroke::NONE));
+                ui.painter()
+                    .add(egui::Shape::convex_polygon(pts_h, gold, egui::Stroke::NONE));
+                if magic_resp.clicked() {
+                    self.start_optimize();
+                }
 
-            ui.add_space(6.0);
+                ui.add_space(8.0);
+                ui.add(
+                    egui::Label::new(
+                        RichText::new(t.optimize_hover)
+                            .small()
+                            .color(Color32::LIGHT_GRAY),
+                    )
+                    .wrap(),
+                );
+            });
+
+            ui.add_space(10.0);
 
             // Channel & Recommendation Bar
             ui.horizontal(|ui| {
