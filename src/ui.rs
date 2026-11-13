@@ -525,18 +525,22 @@ impl eframe::App for SteamRollbackrApp {
             let s = 8.0_f32;
             let m = 2.6_f32;
             let gold = Color32::from_rgb(255, 215, 80);
-            let pts = vec![
+            let pts_v = vec![
                 egui::pos2(cx, cy - s),
-                egui::pos2(cx + m, cy - m),
-                egui::pos2(cx + s, cy),
-                egui::pos2(cx + m, cy + m),
+                egui::pos2(cx + m, cy),
                 egui::pos2(cx, cy + s),
-                egui::pos2(cx - m, cy + m),
+                egui::pos2(cx - m, cy),
+            ];
+            let pts_h = vec![
                 egui::pos2(cx - s, cy),
-                egui::pos2(cx - m, cy - m),
+                egui::pos2(cx, cy - m),
+                egui::pos2(cx + s, cy),
+                egui::pos2(cx, cy + m),
             ];
             ui.painter()
-                .add(egui::Shape::convex_polygon(pts, gold, egui::Stroke::NONE));
+                .add(egui::Shape::convex_polygon(pts_v, gold, egui::Stroke::NONE));
+            ui.painter()
+                .add(egui::Shape::convex_polygon(pts_h, gold, egui::Stroke::NONE));
             if magic_resp.clicked() {
                 self.start_optimize();
             }
