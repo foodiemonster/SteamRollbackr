@@ -4,7 +4,7 @@ use std::thread;
 
 use crate::history::{fetch_manifest_content, fetch_releases, ReleaseEntry};
 use crate::i18n::{draw_flag, texts, Language};
-use crate::slssteam::{check_slsteam_moon, SlsMoonStatus};
+use crate::slssteam::{check_slsteam_moon, find_best_compatible_release, SlsMoonStatus};
 use crate::steam::{
     inspect_steam, lock_only, rollback_to_manifest, unlock_updates, LockState, ManifestChannel,
     SteamStatus,
@@ -17,6 +17,11 @@ enum BgEvent {
         result: Result<Vec<ReleaseEntry>, String>,
     },
     SlsMoonChecked(Result<SlsMoonStatus, String>),
+    OptimizeSelected {
+        channel: ManifestChannel,
+        releases: Vec<ReleaseEntry>,
+        selected_sha: String,
+    },
     Log(String),
     ActionFinished(Result<(), String>),
 }
@@ -197,6 +202,65 @@ impl SteamRollbackrApp {
         });
     }
 
+    fn start_optimize(&mut self) {
+        let Some(steam_dir) = self.status.steam_dir.clone() else {
+            self.initial_ready_only = false;
+            self.logs.push("Error: Steam directory not found.".to_string());
+            return;
+        };
+        self.busy = true;
+        self.initial_ready_only = false;
+        self.logs.clear();
+        self.logs.push("Checking latest slsteam-moon compatible Steam release...".to_string());
+
+        let tx = self.tx.clone();
+        thread::spawn(move || {
+            let mut log_fn = |msg: &str| {
+                let _ = tx.send(BgEvent::Log(msg.to_string()));
+            };
+            let res = match check_slsteam_moon(Some(&steam_dir)) {
+                Ok(moon) => {
+                    log_fn(&format!(
+                        "slsteam-moon / steam-monitor pattern date: {}",
+                        moon.monitor_display
+                    ));
+                    match find_best_compatible_release(moon.monitor_timestamp_utc) {
+                        Ok((best, list)) => {
+                            log_fn(&format!(
+                                "Auto-selected: [{}] {} ({})",
+                                best.channel.suffix(),
+                                best.date_display,
+                                best.short_sha
+                            ));
+                            let _ = tx.send(BgEvent::OptimizeSelected {
+                                channel: best.channel,
+                                releases: list,
+                                selected_sha: best.sha.clone(),
+                            });
+                            match fetch_manifest_content(&best.sha, best.channel) {
+                                Ok((manifest, ver)) => {
+                                    if let Some(v) = ver {
+                                        log_fn(&format!("Downloaded manifest version {v}."));
+                                    }
+                                    rollback_to_manifest(
+                                        &steam_dir,
+                                        best.channel,
+                                        &manifest,
+                                        &mut log_fn,
+                                    )
+                                }
+                                Err(e) => Err(e),
+                            }
+                        }
+                        Err(e) => Err(e),
+                    }
+                }
+                Err(e) => Err(e),
+            };
+            let _ = tx.send(BgEvent::ActionFinished(res));
+        });
+    }
+
     fn poll_events(&mut self) {
         while let Ok(ev) = self.rx.try_recv() {
             match ev {
@@ -229,6 +293,17 @@ impl SteamRollbackrApp {
                         self.logs.push(format!("slsteam-moon check failed: {e}"));
                     }
                     self.moon_status = Some(res);
+                }
+                BgEvent::OptimizeSelected {
+                    channel,
+                    releases,
+                    selected_sha,
+                } => {
+                    self.channel = channel;
+                    self.selected_idx = releases.iter().position(|r| r.sha == selected_sha);
+                    self.releases = releases;
+                    self.current_page = 1;
+                    self.has_more = true;
                 }
                 BgEvent::Log(msg) => {
                     self.initial_ready_only = false;
@@ -483,6 +558,14 @@ impl eframe::App for SteamRollbackrApp {
                     .clicked()
                 {
                     self.start_rollback();
+                }
+
+                if ui
+                    .add_enabled(has_steam && !self.busy, egui::Button::new(t.optimize_btn))
+                    .on_hover_text(t.optimize_hover)
+                    .clicked()
+                {
+                    self.start_optimize();
                 }
 
                 if ui

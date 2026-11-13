@@ -142,6 +142,8 @@ pub struct Texts {
     pub loading_releases: &'static str,
     pub load_older: &'static str,
     pub rollback_and_lock: &'static str,
+    pub optimize_btn: &'static str,
+    pub optimize_hover: &'static str,
     pub unlock_updates: &'static str,
     pub lock_current: &'static str,
     pub working: &'static str,
@@ -190,6 +192,8 @@ pub fn texts(lang: Language) -> Texts {
             loading_releases: "Loading releases from SteamTracking...",
             load_older: "Load Older Releases...",
             rollback_and_lock: "Rollback & Lock Updates",
+            optimize_btn: "Optimize",
+            optimize_hover: "Automatically select the newest Steam release compatible with slsteam-moon, roll back, and lock updates",
             unlock_updates: "Unlock Updates",
             lock_current: "Lock Current Version",
             working: "Working...",
@@ -235,6 +239,8 @@ pub fn texts(lang: Language) -> Texts {
             loading_releases: "Carregando versões do SteamTracking...",
             load_older: "Carregar Versões Anteriores...",
             rollback_and_lock: "Reverter e Bloquear Atualizações",
+            optimize_btn: "Otimizar",
+            optimize_hover: "Seleciona automaticamente a versão mais recente do Steam compatível com slsteam-moon, reverte e bloqueia atualizações",
             unlock_updates: "Desbloquear Atualizações",
             lock_current: "Bloquear Versão Atual",
             working: "Processando...",
@@ -280,6 +286,8 @@ pub fn texts(lang: Language) -> Texts {
             loading_releases: "Cargando versiones desde SteamTracking...",
             load_older: "Cargar Versiones Anteriores...",
             rollback_and_lock: "Revertir y Bloquear Actualizaciones",
+            optimize_btn: "Optimizar",
+            optimize_hover: "Selecciona automáticamente la versión más reciente de Steam compatible con slsteam-moon, revierte y bloquea actualizaciones",
             unlock_updates: "Desbloquear Actualizaciones",
             lock_current: "Bloquear Versión Actual",
             working: "Trabajando...",
@@ -293,3 +301,4 @@ pub fn texts(lang: Language) -> Texts {
         },
     }
 }
+

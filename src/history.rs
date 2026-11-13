@@ -11,6 +11,7 @@ pub struct ReleaseEntry {
     pub sha: String,
     pub short_sha: String,
     pub date_display: String,
+    pub timestamp_utc: i64,
     pub message: String,
     pub channel: ManifestChannel,
 }
@@ -112,6 +113,12 @@ pub fn parse_atom_entries(xml: &str) -> Vec<(String, String, String)> {
     out
 }
 
+fn parse_rfc3339_ts(date_str: &str) -> i64 {
+    DateTime::parse_from_rfc3339(date_str)
+        .map(|dt| dt.timestamp())
+        .unwrap_or(0)
+}
+
 fn format_rfc3339(date_str: &str) -> String {
     DateTime::parse_from_rfc3339(date_str)
         .map(|dt| {
@@ -162,6 +169,7 @@ fn fetch_releases_atom(channel: ManifestChannel) -> Result<Vec<ReleaseEntry>, St
             sha,
             short_sha,
             date_display: format_rfc3339(&updated),
+            timestamp_utc: parse_rfc3339_ts(&updated),
             message: title,
             channel,
         });
@@ -228,6 +236,7 @@ pub fn fetch_releases(channel: ManifestChannel, page: u32) -> Result<Vec<Release
             sha: c.sha,
             short_sha,
             date_display: format_rfc3339(&c.commit.author.date),
+            timestamp_utc: parse_rfc3339_ts(&c.commit.author.date),
             message: first_line,
             channel,
         });

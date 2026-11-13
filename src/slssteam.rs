@@ -3,10 +3,14 @@ use std::path::Path;
 use std::process::Command;
 use std::time::Duration;
 
-use crate::history::{parse_atom_entries, read_cache, read_stale_cache, write_cache};
+use crate::history::{
+    fetch_releases, parse_atom_entries, read_cache, read_stale_cache, write_cache, ReleaseEntry,
+};
+use crate::steam::ManifestChannel;
 
 #[derive(Debug, Clone)]
 pub struct SlsMoonStatus {
+    pub monitor_timestamp_utc: i64,
     pub monitor_display: String,
     pub moon_display: String,
     pub latest_steam_display: Option<String>,
@@ -112,6 +116,7 @@ pub fn check_slsteam_moon(steam_dir: Option<&Path>) -> Result<SlsMoonStatus, Str
     };
 
     Ok(SlsMoonStatus {
+        monitor_timestamp_utc: monitor_date.timestamp(),
         monitor_display: format_dt(monitor_date),
         moon_display: format_dt(moon_date),
         latest_steam_display: latest_steam_date.map(format_dt),
@@ -119,4 +124,39 @@ pub fn check_slsteam_moon(steam_dir: Option<&Path>) -> Result<SlsMoonStatus, Str
         local_pattern_supported,
         local_steamclient_sha,
     })
+}
+
+/// Finds the newest Steam release across steamrt64 and ubuntu12 compatible with `cutoff_utc`.
+pub fn find_best_compatible_release(
+    cutoff_utc: i64,
+) -> Result<(ReleaseEntry, Vec<ReleaseEntry>), String> {
+    let rt64 = fetch_releases(ManifestChannel::SteamRt64, 1)?;
+    let u12 = fetch_releases(ManifestChannel::Ubuntu12, 1)?;
+
+    // 1-hour grace window accounts for SteamTracking vs steam-monitor publish skew
+    let limit = cutoff_utc + 3600;
+    let best_rt64 = rt64
+        .iter()
+        .find(|e| e.timestamp_utc > 0 && e.timestamp_utc <= limit)
+        .cloned();
+    let best_u12 = u12
+        .iter()
+        .find(|e| e.timestamp_utc > 0 && e.timestamp_utc <= limit)
+        .cloned();
+
+    match (best_rt64, best_u12) {
+        (Some(r), Some(u)) => {
+            if r.timestamp_utc >= u.timestamp_utc {
+                Ok((r, rt64))
+            } else {
+                Ok((u, u12))
+            }
+        }
+        (Some(r), None) => Ok((r, rt64)),
+        (None, Some(u)) => Ok((u, u12)),
+        (None, None) => Err(
+            "No compatible Steam release found within the latest slsteam-moon pattern window."
+                .to_string(),
+        ),
+    }
 }
