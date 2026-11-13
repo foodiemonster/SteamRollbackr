@@ -36,10 +36,8 @@ cargo build --release
 ## Usage
 
 1. Open **SteamRollbackr** from your application menu (or run `~/.local/bin/steamrollbackr`).
-2. Select a channel:
-   - `steamrt64` (recommended for modern 64-bit Linux systems)
-   - `ubuntu12` (legacy pre-November 2026 builds)
-3. Pick a release from the list and click **Rollback & Lock Updates**.
+2. **Recommended:** Click the **Magic Button** to automatically pick the newest Steam release compatible with `slsteam-moon`, roll back to it, and lock updates.
+3. **Manual option:** If you prefer a specific version, select a channel (`steamrt64` for modern 64-bit Linux, or `ubuntu12` for legacy pre-November 2026 builds), pick a release from the list, and click **Rollback & Lock Updates**.
 4. To allow Steam to update again later, click **Unlock Updates**.
 5. To lock your current version without rolling back, click **Lock Current Version**.
 
