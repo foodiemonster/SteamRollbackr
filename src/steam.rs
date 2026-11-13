@@ -1,4 +1,5 @@
 use chrono::{DateTime, Local, Utc};
+use serde::Deserialize;
 use std::fs;
 use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
@@ -28,13 +29,6 @@ impl ManifestChannel {
             ManifestChannel::SteamRt64 => "steam_client_steamrt64",
         }
     }
-
-    pub fn label(self) -> &'static str {
-        match self {
-            ManifestChannel::Ubuntu12 => "ubuntu12 (Legacy / Pre-Nov 2026)",
-            ManifestChannel::SteamRt64 => "steamrt64 (64-bit / Recommended)",
-        }
-    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -57,12 +51,62 @@ impl LockState {
     }
 }
 
+#[derive(Debug, Clone, Default)]
+pub struct LumenVersions {
+    pub slsteam_moon: Option<String>,
+    pub lumen: Option<String>,
+    pub luatools: Option<String>,
+    pub slssteam_installed: bool,
+    pub lumen_installed: bool,
+    pub luatools_installed: bool,
+}
+
+#[derive(Deserialize)]
+struct LumenVersionsJson {
+    slsteam_moon: Option<LumenComponent>,
+    lumen: Option<LumenComponent>,
+    plugin: Option<LumenComponent>,
+}
+
+#[derive(Deserialize)]
+struct LumenComponent {
+    tag: Option<String>,
+}
+
+fn read_lumen_versions() -> LumenVersions {
+    let Some(home) = std::env::var_os("HOME").map(PathBuf::from) else {
+        return LumenVersions::default();
+    };
+    let slssteam_installed = home.join(".local/share/SLSsteam/SLSsteam.so").is_file();
+    let lumen_installed = home.join(".local/share/Lumen/lumen").is_file();
+    let luatools_installed =
+        home.join(".local/share/LuaTools").is_dir() || home.join(".local/share/Lumen/luatools").is_dir();
+
+    let mut out = LumenVersions {
+        slssteam_installed,
+        lumen_installed,
+        luatools_installed,
+        ..Default::default()
+    };
+
+    let versions_path = home.join(".local/share/Lumen/versions.json");
+    if let Ok(content) = fs::read_to_string(versions_path) {
+        if let Ok(parsed) = serde_json::from_str::<LumenVersionsJson>(&content) {
+            out.slsteam_moon = parsed.slsteam_moon.and_then(|c| c.tag);
+            out.lumen = parsed.lumen.and_then(|c| c.tag);
+            out.luatools = parsed.plugin.and_then(|c| c.tag);
+        }
+    }
+    out
+}
+
 #[derive(Debug, Clone)]
 pub struct SteamStatus {
     pub steam_dir: Option<PathBuf>,
     pub is_flatpak: bool,
     pub current_version: Option<ClientVersion>,
     pub lock_state: LockState,
+    pub lumen_versions: LumenVersions,
 }
 
 /// Searches standard and Flatpak Steam locations in a distro-agnostic order.
@@ -159,6 +203,7 @@ pub fn check_lock_state(steam_dir: &Path) -> LockState {
 
 pub fn inspect_steam() -> SteamStatus {
     let steam_dir = find_steam_dir();
+    let lumen_versions = read_lumen_versions();
     match steam_dir {
         Some(dir) => {
             let is_flatpak = dir
@@ -171,6 +216,7 @@ pub fn inspect_steam() -> SteamStatus {
                 is_flatpak,
                 current_version,
                 lock_state,
+                lumen_versions,
             }
         }
         None => SteamStatus {
@@ -178,6 +224,7 @@ pub fn inspect_steam() -> SteamStatus {
             is_flatpak: false,
             current_version: None,
             lock_state: LockState::Unlocked,
+            lumen_versions,
         },
     }
 }
@@ -299,6 +346,44 @@ pub fn unlock_updates(steam_dir: &Path, log: &mut dyn FnMut(&str)) -> Result<(),
         }
     }
     log("SUCCESS! Steam is unlocked and can now receive updates.");
+    Ok(())
+}
+
+/// Unlocks Steam updates and runs the Steam updater to restore the latest official client.
+pub fn unlock_and_update_steam(steam_dir: &Path, log: &mut dyn FnMut(&str)) -> Result<(), String> {
+    let bin = find_steam_bin(steam_dir)
+        .ok_or_else(|| "Could not find steam binary (ubuntu12_32/steam or steam.sh)".to_string())?;
+
+    kill_steam(log);
+    unlock_updates(steam_dir, log)?;
+    cleanup_conflicting_files(steam_dir, ManifestChannel::SteamRt64, log);
+
+    log("Updating Steam to the latest official release...");
+    let status = Command::new(&bin)
+        .args(["-forcemanifestsuffix", "steamrt64", "-forcesteamupdate", "-exitsteam"])
+        .status();
+
+    match status {
+        Ok(s) => log(&format!("Steam updater finished with status: {s}")),
+        Err(e) => return Err(format!("Failed to run Steam updater: {e}")),
+    }
+
+    reset_slsteam_boot_count(log);
+    log("SUCCESS! Steam has been unlocked and updated to the latest release.");
+    Ok(())
+}
+
+/// Restarts the Steam client cleanly.
+pub fn restart_steam(steam_dir: &Path, log: &mut dyn FnMut(&str)) -> Result<(), String> {
+    let bin = find_steam_bin(steam_dir)
+        .ok_or_else(|| "Could not find steam binary (ubuntu12_32/steam or steam.sh)".to_string())?;
+
+    kill_steam(log);
+    log("Starting Steam...");
+    Command::new(&bin)
+        .spawn()
+        .map_err(|e| format!("Failed to start Steam: {e}"))?;
+    log("Steam launched.");
     Ok(())
 }
 

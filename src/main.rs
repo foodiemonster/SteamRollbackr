@@ -10,8 +10,8 @@ use eframe::egui;
 fn main() -> eframe::Result<()> {
     let mut viewport = egui::ViewportBuilder::default()
         .with_app_id("steamrollbackr")
-        .with_inner_size([760.0, 620.0])
-        .with_min_inner_size([600.0, 480.0]);
+        .with_inner_size([880.0, 620.0])
+        .with_min_inner_size([720.0, 520.0]);
 
     if let Ok(icon) = eframe::icon_data::from_png_bytes(include_bytes!("../packaging/steamrollbackr.png")) {
         viewport = viewport.with_icon(icon);
