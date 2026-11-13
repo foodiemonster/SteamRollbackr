@@ -507,6 +507,43 @@ impl eframe::App for SteamRollbackrApp {
 
             ui.add_space(6.0);
 
+            // Big Magic Button above Channel line
+            let has_steam = self.status.steam_dir.is_some();
+            let magic_btn = egui::Button::new(
+                RichText::new(format!("    {}", t.optimize_btn))
+                    .size(15.0)
+                    .strong(),
+            )
+            .fill(Color32::from_rgb(38, 79, 120))
+            .min_size(egui::vec2(ui.available_width(), 34.0));
+
+            let magic_resp = ui.add_enabled(has_steam && !self.busy, magic_btn);
+            // Draw crisp gold 4-point sparkle icon inside the Magic Button
+            let r = magic_resp.rect;
+            let cx = r.center().x - 56.0;
+            let cy = r.center().y;
+            let s = 8.0_f32;
+            let m = 2.6_f32;
+            let gold = Color32::from_rgb(255, 215, 80);
+            let pts = vec![
+                egui::pos2(cx, cy - s),
+                egui::pos2(cx + m, cy - m),
+                egui::pos2(cx + s, cy),
+                egui::pos2(cx + m, cy + m),
+                egui::pos2(cx, cy + s),
+                egui::pos2(cx - m, cy + m),
+                egui::pos2(cx - s, cy),
+                egui::pos2(cx - m, cy - m),
+            ];
+            ui.painter()
+                .add(egui::Shape::convex_polygon(pts, gold, egui::Stroke::NONE));
+            if magic_resp.clicked() {
+                self.start_optimize();
+            }
+            ui.label(RichText::new(t.optimize_hover).small().color(Color32::LIGHT_GRAY));
+
+            ui.add_space(6.0);
+
             // Channel & Recommendation Bar
             ui.horizontal(|ui| {
                 ui.label(RichText::new(t.channel).strong());
@@ -558,14 +595,6 @@ impl eframe::App for SteamRollbackrApp {
                     .clicked()
                 {
                     self.start_rollback();
-                }
-
-                if ui
-                    .add_enabled(has_steam && !self.busy, egui::Button::new(t.optimize_btn))
-                    .on_hover_text(t.optimize_hover)
-                    .clicked()
-                {
-                    self.start_optimize();
                 }
 
                 if ui
