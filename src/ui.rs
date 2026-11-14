@@ -161,7 +161,13 @@ fn pill_badge(ui: &mut egui::Ui, text: &str, bg: Color32, fg: Color32) {
         });
 }
 
-fn draw_sidebar_icon(painter: &egui::Painter, center: egui::Pos2, icon: SidebarIcon, color: Color32) {
+fn draw_sidebar_icon(
+    painter: &egui::Painter,
+    center: egui::Pos2,
+    icon: SidebarIcon,
+    color: Color32,
+    spin_angle: f32,
+) {
     let s = Stroke::new(1.4_f32, color);
     let x = center.x;
     let y = center.y;
@@ -201,10 +207,27 @@ fn draw_sidebar_icon(painter: &egui::Painter, center: egui::Pos2, icon: SidebarI
             }
         }
         SidebarIcon::Refresh => {
-            // Circular arrow
-            painter.circle_stroke(center, 5.0, s);
-            painter.line_segment([egui::pos2(x + 3.0, y - 5.0), egui::pos2(x + 6.0, y - 2.5)], s);
-            painter.line_segment([egui::pos2(x + 3.0, y - 5.0), egui::pos2(x + 1.0, y - 2.0)], s);
+            // Open circling arrow (~275 deg arc + arrowhead), rotated by spin_angle
+            let r = 5.2_f32;
+            let base = -std::f32::consts::FRAC_PI_4 + spin_angle;
+            let sweep = std::f32::consts::PI * 1.52;
+            let start = base - sweep;
+            let steps = 20;
+            let pts: Vec<egui::Pos2> = (0..=steps)
+                .map(|i| {
+                    let a = start + sweep * (i as f32 / steps as f32);
+                    egui::pos2(x + r * a.cos(), y + r * a.sin())
+                })
+                .collect();
+            painter.add(egui::Shape::line(pts, s));
+
+            let tip = egui::pos2(x + r * base.cos(), y + r * base.sin());
+            let tangent = Vec2::new(-base.sin(), base.cos());
+            let radial = Vec2::new(base.cos(), base.sin());
+            let wing1 = tip - tangent * 3.4 + radial * 2.5;
+            let wing2 = tip - tangent * 3.4 - radial * 2.5;
+            painter.line_segment([tip, wing1], s);
+            painter.line_segment([tip, wing2], s);
         }
         SidebarIcon::Restart => {
             // Power / restart symbol
@@ -220,6 +243,17 @@ fn sidebar_item(
     label: &str,
     active: bool,
     enabled: bool,
+) -> egui::Response {
+    sidebar_item_spin(ui, icon, label, active, enabled, 0.0)
+}
+
+fn sidebar_item_spin(
+    ui: &mut egui::Ui,
+    icon: SidebarIcon,
+    label: &str,
+    active: bool,
+    enabled: bool,
+    spin_angle: f32,
 ) -> egui::Response {
     let desired = Vec2::new(ui.available_width(), 32.0);
     let (rect, resp) = ui.allocate_exact_size(
@@ -264,6 +298,7 @@ fn sidebar_item(
         egui::pos2(rect.left() + 20.0, rect.center().y),
         icon,
         fg,
+        spin_angle,
     );
     ui.painter().text(
         egui::pos2(rect.left() + 36.0, rect.center().y),
@@ -732,8 +767,22 @@ impl SteamRollbackrApp {
                         self.start_restart_steam();
                     }
 
-                    if sidebar_item(ui, SidebarIcon::Refresh, t.refresh_status, false, !self.busy)
-                        .clicked()
+                    let is_refreshing = self.checking_moon || self.loading_releases;
+                    let spin_angle = if is_refreshing {
+                        ui.ctx().request_repaint();
+                        ui.ctx().input(|i| i.time as f32 * 6.0)
+                    } else {
+                        0.0
+                    };
+                    if sidebar_item_spin(
+                        ui,
+                        SidebarIcon::Refresh,
+                        t.refresh_status,
+                        false,
+                        !self.busy,
+                        spin_angle,
+                    )
+                    .clicked()
                     {
                         self.refresh_status();
                         self.check_moon();
