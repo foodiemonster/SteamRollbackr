@@ -1030,9 +1030,12 @@ impl SteamRollbackrApp {
             let green_fg = Color32::from_rgb(130, 230, 155);
 
             // Compute consistent column widths across all System Status rows
-            let row_h = 24.0;
+            let row_h = 26.0;
             let body_font = egui::FontId::proportional(14.0);
             let small_font = egui::FontId::proportional(12.0);
+            let avail_w = ui.available_width();
+            let gap = 16.0;
+
             let col1_w = ui.fonts(|f| {
                 [t.steam_client, "slssteam-moon", "LuaTools", "Lumen"]
                     .iter()
@@ -1051,50 +1054,66 @@ impl SteamRollbackrApp {
                 .iter()
                 .map(|s| f.layout_no_wrap((*s).to_string(), small_font.clone(), Color32::WHITE).size().x)
                 .fold(0.0_f32, f32::max)
-            }) + 22.0;
-            let spacing = ui.spacing().item_spacing.x;
-            let col3_w = (ui.available_width() - col1_w - col2_w - col4_w - spacing * 3.0).max(80.0);
+            }) + 24.0;
+            let col3_w = (avail_w - col1_w - col2_w - col4_w - gap * 3.0).max(80.0);
 
             let draw_status_row = |ui: &mut egui::Ui,
                                    name: &str,
                                    link: Option<(&str, &str)>,
                                    version: &str,
                                    badge: Option<(&str, Color32, Color32)>| {
-                ui.horizontal(|ui| {
-                    ui.allocate_ui_with_layout(
-                        Vec2::new(col1_w, row_h),
-                        egui::Layout::left_to_right(egui::Align::Center),
-                        |ui| {
-                            ui.label(RichText::new(name).color(Color32::LIGHT_GRAY));
-                        },
-                    );
-                    ui.allocate_ui_with_layout(
-                        Vec2::new(col2_w, row_h),
-                        egui::Layout::centered_and_justified(egui::Direction::LeftToRight),
-                        |ui| {
-                            if let Some((url, hover)) = link {
-                                external_link_btn(ui, url, hover);
-                            }
-                        },
-                    );
-                    ui.allocate_ui_with_layout(
-                        Vec2::new(col3_w, row_h),
-                        egui::Layout::left_to_right(egui::Align::Center),
-                        |ui| {
-                            ui.set_max_width(col3_w);
-                            ui.add(egui::Label::new(version).truncate());
-                        },
-                    );
-                    ui.allocate_ui_with_layout(
-                        Vec2::new(col4_w, row_h),
-                        egui::Layout::left_to_right(egui::Align::Center),
-                        |ui| {
-                            if let Some((text, bg, fg)) = badge {
-                                pill_badge(ui, text, bg, fg);
-                            }
-                        },
-                    );
-                });
+                let (row_rect, _) =
+                    ui.allocate_exact_size(Vec2::new(avail_w, row_h), egui::Sense::hover());
+
+                let x0 = row_rect.left();
+                let x1 = x0 + col1_w + gap;
+                let x2 = x1 + col2_w + gap;
+                let x3 = x2 + col3_w + gap;
+
+                let rect1 = egui::Rect::from_min_size(egui::pos2(x0, row_rect.top()), Vec2::new(col1_w, row_h));
+                let rect2 = egui::Rect::from_min_size(egui::pos2(x1, row_rect.top()), Vec2::new(col2_w, row_h));
+                let rect3 = egui::Rect::from_min_size(egui::pos2(x2, row_rect.top()), Vec2::new(col3_w, row_h));
+                let rect4 = egui::Rect::from_min_size(egui::pos2(x3, row_rect.top()), Vec2::new(col4_w, row_h));
+
+                ui.allocate_new_ui(
+                    egui::UiBuilder::new()
+                        .max_rect(rect1)
+                        .layout(egui::Layout::left_to_right(egui::Align::Center)),
+                    |ui| {
+                        ui.label(RichText::new(name).color(Color32::LIGHT_GRAY));
+                    },
+                );
+
+                ui.allocate_new_ui(
+                    egui::UiBuilder::new()
+                        .max_rect(rect2)
+                        .layout(egui::Layout::centered_and_justified(egui::Direction::LeftToRight)),
+                    |ui| {
+                        if let Some((url, hover)) = link {
+                            external_link_btn(ui, url, hover);
+                        }
+                    },
+                );
+
+                ui.allocate_new_ui(
+                    egui::UiBuilder::new()
+                        .max_rect(rect3)
+                        .layout(egui::Layout::left_to_right(egui::Align::Center)),
+                    |ui| {
+                        ui.add(egui::Label::new(version).truncate());
+                    },
+                );
+
+                ui.allocate_new_ui(
+                    egui::UiBuilder::new()
+                        .max_rect(rect4)
+                        .layout(egui::Layout::left_to_right(egui::Align::Center)),
+                    |ui| {
+                        if let Some((text, bg, fg)) = badge {
+                            pill_badge(ui, text, bg, fg);
+                        }
+                    },
+                );
             };
 
             // Row 1: Local Steam Client Version
