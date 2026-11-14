@@ -57,6 +57,8 @@ pub struct SteamRollbackrApp {
     available_update: Option<UpdateInfo>,
     show_update_popup: bool,
     updating_app: bool,
+    show_tools_tip: bool,
+    tools_btn_rect: Option<egui::Rect>,
     current_page: u32,
     has_more: bool,
     loading_releases: bool,
@@ -212,10 +214,52 @@ fn draw_sidebar_icon(
             }
         }
         SidebarIcon::Tools => {
-            // Diagonal wrench / tool silhouette
-            painter.line_segment([egui::pos2(x - 4.5, y + 4.5), egui::pos2(x + 2.0, y - 2.0)], Stroke::new(1.8_f32, color));
-            painter.circle_stroke(egui::pos2(x + 3.2, y - 3.2), 2.5, s);
-            painter.line_segment([egui::pos2(x + 3.0, y - 3.0), egui::pos2(x + 5.2, y - 5.2)], Stroke::new(1.6_f32, Color32::from_rgb(32, 32, 34)));
+            // Crossed wrench (top-left to bottom-right) & screwdriver (bottom-left to top-right)
+            // 1. Screwdriver handle (bottom-left) & shaft/tip (top-right), gapped at center
+            let sd_end = egui::pos2(x - 4.8, y + 4.8);
+            let sd_handle_top = egui::pos2(x - 1.7, y + 1.7);
+            painter.line_segment([sd_end, sd_handle_top], Stroke::new(2.8_f32, color));
+            painter.circle_filled(sd_end, 1.4_f32, color);
+
+            let sd_shaft_bot = egui::pos2(x + 1.6, y - 1.6);
+            let sd_shaft_top = egui::pos2(x + 3.8, y - 3.8);
+            painter.line_segment([sd_shaft_bot, sd_shaft_top], Stroke::new(1.5_f32, color));
+
+            // Flathead screwdriver tip at top-right
+            painter.add(egui::Shape::convex_polygon(
+                vec![
+                    egui::pos2(x + 3.2, y - 4.6),
+                    egui::pos2(x + 4.9, y - 5.6),
+                    egui::pos2(x + 5.6, y - 4.9),
+                    egui::pos2(x + 4.6, y - 3.2),
+                ],
+                color,
+                Stroke::NONE,
+            ));
+
+            // 2. Double-ended wrench crossing from top-left to bottom-right
+            painter.line_segment(
+                [egui::pos2(x - 2.4, y - 2.4), egui::pos2(x + 2.4, y + 2.4)],
+                Stroke::new(2.1_f32, color),
+            );
+            let draw_jaw = |cx: f32, cy: f32, open_angle: f32| {
+                let r = 2.4_f32;
+                let gap = 0.36_f32 * std::f32::consts::PI;
+                let a0 = open_angle + gap;
+                let a1 = open_angle + 2.0 * std::f32::consts::PI - gap;
+                let steps = 12;
+                let pts: Vec<egui::Pos2> = (0..=steps)
+                    .map(|i| {
+                        let a = a0 + (a1 - a0) * (i as f32 / steps as f32);
+                        egui::pos2(cx + r * a.cos(), cy + r * a.sin())
+                    })
+                    .collect();
+                painter.add(egui::Shape::line(pts, Stroke::new(1.6_f32, color)));
+            };
+            // Top-left jaw opens toward -135 deg (-0.75 * PI)
+            draw_jaw(x - 3.9, y - 3.9, -0.75_f32 * std::f32::consts::PI);
+            // Bottom-right jaw opens toward +45 deg (0.25 * PI)
+            draw_jaw(x + 3.9, y + 3.9, 0.25_f32 * std::f32::consts::PI);
         }
         SidebarIcon::Troubleshooting => {
             // Circle with question mark
@@ -454,6 +498,8 @@ impl SteamRollbackrApp {
             available_update: None,
             show_update_popup: false,
             updating_app: false,
+            show_tools_tip: Self::should_show_tools_tip(),
+            tools_btn_rect: None,
             current_page: 1,
             has_more: true,
             loading_releases: false,
@@ -471,6 +517,34 @@ impl SteamRollbackrApp {
         app.check_moon();
         app.check_app_update();
         app
+    }
+
+    fn tools_tip_marker_path() -> Option<PathBuf> {
+        std::env::var_os("HOME")
+            .map(|h| PathBuf::from(h).join(".cache/steamrollbackr/seen_tools_notice_version"))
+    }
+
+    fn should_show_tools_tip() -> bool {
+        let Some(path) = Self::tools_tip_marker_path() else {
+            return false;
+        };
+        match std::fs::read_to_string(&path) {
+            Ok(ver) => ver.trim() != CURRENT_VERSION,
+            Err(_) => true,
+        }
+    }
+
+    fn dismiss_tools_tip(&mut self) {
+        if !self.show_tools_tip {
+            return;
+        }
+        self.show_tools_tip = false;
+        if let Some(path) = Self::tools_tip_marker_path() {
+            if let Some(parent) = path.parent() {
+                let _ = std::fs::create_dir_all(parent);
+            }
+            let _ = std::fs::write(path, CURRENT_VERSION);
+        }
     }
 
     fn set_language(&mut self, new_lang: Language) {
@@ -882,8 +956,15 @@ impl SteamRollbackrApp {
                     ),
                     (ActiveTab::Logs, SidebarIcon::Logs, t.nav_logs),
                 ] {
-                    if sidebar_item(ui, icon, label, self.active_tab == tab, true).clicked() {
+                    let resp = sidebar_item(ui, icon, label, self.active_tab == tab, true);
+                    if tab == ActiveTab::Tools {
+                        self.tools_btn_rect = Some(resp.rect);
+                    }
+                    if resp.clicked() {
                         self.active_tab = tab;
+                        if tab == ActiveTab::Tools {
+                            self.dismiss_tools_tip();
+                        }
                     }
                     ui.add_space(2.0);
                 }
@@ -1748,7 +1829,7 @@ impl SteamRollbackrApp {
             });
 
             ui.add_space(8.0);
-            egui::ScrollArea::vertical()
+                egui::ScrollArea::vertical()
                 .id_salt("release_list_scroll")
                 .max_height(list_height)
                 .auto_shrink([false, false])
@@ -1950,6 +2031,61 @@ impl SteamRollbackrApp {
         });
     }
 
+    fn render_tools_flyout_tip(&mut self, ctx: &egui::Context, t: &Texts) {
+        if !self.show_tools_tip {
+            return;
+        }
+        let Some(btn_rect) = self.tools_btn_rect else {
+            return;
+        };
+
+        let t_sec = ctx.input(|i| i.time);
+        let bounce = (t_sec * 4.5).sin().abs() as f32 * 8.0;
+        ctx.request_repaint_after(std::time::Duration::from_millis(16));
+
+        let anchor = egui::pos2(btn_rect.right() + 6.0 + bounce, btn_rect.center().y);
+        let bg = Color32::from_rgb(38, 105, 178);
+        let border = Color32::from_rgb(108, 178, 248);
+
+        egui::Area::new(egui::Id::new("tools_flyout_tip"))
+            .order(egui::Order::Foreground)
+            .fixed_pos(egui::pos2(anchor.x + 8.0, anchor.y - 14.0))
+            .show(ctx, |ui| {
+                let arrow_tip = egui::pos2(anchor.x, anchor.y);
+                let painter = ui.painter();
+                painter.add(egui::Shape::convex_polygon(
+                    vec![
+                        arrow_tip,
+                        egui::pos2(anchor.x + 9.0, anchor.y - 6.0),
+                        egui::pos2(anchor.x + 9.0, anchor.y + 6.0),
+                    ],
+                    bg,
+                    egui::Stroke::new(1.0_f32, border),
+                ));
+
+                let resp = egui::Frame::none()
+                    .fill(bg)
+                    .stroke(egui::Stroke::new(1.0_f32, border))
+                    .rounding(Rounding::same(6.0))
+                    .inner_margin(Margin::symmetric(10.0, 5.0))
+                    .show(ui, |ui| {
+                        ui.label(
+                            RichText::new(t.new_tools_tooltip)
+                                .size(12.0)
+                                .strong()
+                                .color(Color32::WHITE),
+                        );
+                    })
+                    .response
+                    .interact(egui::Sense::click());
+
+                if resp.clicked() {
+                    self.active_tab = ActiveTab::Tools;
+                    self.dismiss_tools_tip();
+                }
+            });
+    }
+
     fn render_tools(&mut self, ui: &mut egui::Ui, t: &Texts) {
         ui.label(
             RichText::new(t.tools_title)
@@ -1966,8 +2102,13 @@ impl SteamRollbackrApp {
             .steam_dir
             .as_ref()
             .is_some_and(|d| d.join("ubuntu12_32/libcrypto.so.3").is_file());
-        let luatools_moon_installed = self.status.lumen_versions.luatools_installed
+        let luatools_moon_present = self.status.lumen_versions.luatools_installed
             || self.status.lumen_versions.luatools.is_some();
+        let luatools_fork = crate::steam::read_luatools_moon_fork();
+        let rafie_installed =
+            luatools_moon_present && luatools_fork.as_deref() == Some("rafie");
+        let swwayps_installed =
+            luatools_moon_present && matches!(luatools_fork.as_deref(), Some("swwayps") | None);
         let luatools_linux_installed = is_luatools_linux_installed();
 
         let bold_font = egui::FontId::new(15.5, egui::FontFamily::Name("fluent_bold".into()));
@@ -2016,6 +2157,31 @@ impl SteamRollbackrApp {
             );
             resp
         };
+
+        if self.busy {
+            egui::Frame::none()
+                .fill(Color32::from_rgb(36, 52, 74))
+                .stroke(Stroke::new(1.0_f32, Color32::from_rgb(76, 136, 206)))
+                .rounding(Rounding::same(8.0))
+                .inner_margin(Margin::symmetric(12.0, 8.0))
+                .show(ui, |ui| {
+                    ui.set_width(ui.available_width());
+                    ui.horizontal(|ui| {
+                        ui.spinner();
+                        ui.label(RichText::new(t.working).strong().color(Color32::WHITE));
+                        if let Some(last) = self.logs.last() {
+                            ui.add(
+                                egui::Label::new(
+                                    RichText::new(format!("— {last}"))
+                                        .color(Color32::from_rgb(200, 220, 245)),
+                                )
+                                .truncate(),
+                            );
+                        }
+                    });
+                });
+            ui.add_space(10.0);
+        }
 
         egui::ScrollArea::vertical()
             .id_salt("tools_scroll")
@@ -2069,18 +2235,19 @@ impl SteamRollbackrApp {
 
                 ui.add_space(10.0);
 
-                // Tool 2: LuaTools (swwayps / luatools-moon)
+                // Tool 2: Unified LuaTools Switcher
+                let any_luatools = rafie_installed || swwayps_installed || luatools_linux_installed;
                 card_frame().show(ui, |ui| {
                     ui.set_width(ui.available_width());
                     ui.horizontal(|ui| {
                         ui.label(
-                            RichText::new(t.luatools_moon_title)
+                            RichText::new(t.luatools_section_title)
                                 .font(bold_font.clone())
                                 .color(Color32::WHITE),
                         );
                         ui.add_space(6.0);
-                        if luatools_moon_installed {
-                            pill_badge(ui, t.installed_pill, green_bg, green_fg);
+                        if any_luatools {
+                            pill_badge(ui, t.active_pill, green_bg, green_fg);
                         } else {
                             pill_badge(
                                 ui,
@@ -2090,86 +2257,270 @@ impl SteamRollbackrApp {
                             );
                         }
                     });
-                    ui.add_space(6.0);
+                    ui.add_space(4.0);
                     ui.add(
                         egui::Label::new(
-                            RichText::new(t.luatools_moon_desc).color(Color32::LIGHT_GRAY),
+                            RichText::new(t.luatools_section_desc).color(Color32::LIGHT_GRAY),
                         )
                         .wrap(),
                     );
                     ui.add_space(10.0);
-                    ui.columns(2, |cols| {
-                        let can_install = !self.busy && !luatools_moon_installed;
-                        let can_uninstall = !self.busy && luatools_moon_installed;
-                        if tool_btn(
-                            &mut cols[0],
-                            t.install_btn,
-                            can_install,
-                            Color32::from_rgb(42, 88, 142),
-                            Color32::from_rgb(76, 136, 206),
-                        )
-                        .clicked()
-                        {
-                            self.start_shell_tool(
-                                "Installing LuaTools (swwayps)...",
-                                "curl -fsSL https://raw.githubusercontent.com/swwayps/luatools-moon/main/install.sh | bash",
+
+                    let option_frame = |active: bool| {
+                        egui::Frame::none()
+                            .fill(Color32::from_rgb(44, 45, 50))
+                            .stroke(Stroke::new(
+                                1.0_f32,
+                                if active {
+                                    Color32::from_rgb(72, 148, 92)
+                                } else {
+                                    Color32::from_rgb(64, 66, 72)
+                                },
+                            ))
+                            .rounding(Rounding::same(8.0))
+                            .inner_margin(Margin::same(12.0))
+                    };
+
+                    // Option A: Rafie-kun / luatools-moon (Recommended)
+                    option_frame(rafie_installed).show(ui, |ui| {
+                        ui.set_width(ui.available_width());
+                        ui.horizontal(|ui| {
+                            ui.label(
+                                RichText::new(t.luatools_rafie_title)
+                                    .strong()
+                                    .color(Color32::WHITE),
                             );
-                        }
-                        if tool_btn(
-                            &mut cols[1],
-                            t.uninstall_btn,
-                            can_uninstall,
-                            Color32::from_rgb(122, 40, 40),
-                            Color32::from_rgb(184, 72, 72),
-                        )
-                        .clicked()
-                        {
-                            self.start_shell_tool(
-                                "Uninstalling LuaTools (swwayps)...",
-                                "curl -fsSL https://raw.githubusercontent.com/swwayps/luatools-moon/main/uninstall.sh | bash",
+                            ui.add_space(4.0);
+                            pill_badge(
+                                ui,
+                                t.recommended_pill,
+                                Color32::from_rgb(38, 72, 118),
+                                Color32::from_rgb(135, 195, 255),
                             );
+                            if rafie_installed {
+                                ui.add_space(4.0);
+                                pill_badge(ui, t.active_pill, green_bg, green_fg);
+                            }
+                        });
+                        ui.add_space(4.0);
+                        ui.add(
+                            egui::Label::new(
+                                RichText::new(t.luatools_rafie_desc)
+                                    .size(12.5)
+                                    .color(Color32::LIGHT_GRAY),
+                            )
+                            .wrap(),
+                        );
+                        ui.add_space(8.0);
+                        if rafie_installed {
+                            ui.columns(2, |cols| {
+                                if tool_btn(
+                                    &mut cols[0],
+                                    t.reinstall_btn,
+                                    !self.busy,
+                                    Color32::from_rgb(56, 60, 68),
+                                    Color32::from_rgb(92, 96, 108),
+                                )
+                                .clicked()
+                                {
+                                    self.start_shell_tool(
+                                        "Reinstalling LuaTools (Rafie-kun)...",
+                                        "curl -fsSL https://raw.githubusercontent.com/Rafie-kun/luatools-moon/main/install.sh | bash && mkdir -p \"$HOME/.cache/steamrollbackr\" && printf rafie > \"$HOME/.cache/steamrollbackr/luatools_moon_fork\"",
+                                    );
+                                }
+                                if tool_btn(
+                                    &mut cols[1],
+                                    t.uninstall_btn,
+                                    !self.busy,
+                                    Color32::from_rgb(122, 40, 40),
+                                    Color32::from_rgb(184, 72, 72),
+                                )
+                                .clicked()
+                                {
+                                    self.start_shell_tool(
+                                        "Uninstalling LuaTools (Rafie-kun)...",
+                                        "curl -fsSL https://raw.githubusercontent.com/Rafie-kun/luatools-moon/main/uninstall.sh | bash; rm -f \"$HOME/.cache/steamrollbackr/luatools_moon_fork\"",
+                                    );
+                                }
+                            });
+                        } else {
+                            let btn_label = if swwayps_installed {
+                                t.switch_btn
+                            } else {
+                                t.install_btn
+                            };
+                            if tool_btn(
+                                ui,
+                                btn_label,
+                                !self.busy,
+                                Color32::from_rgb(42, 88, 142),
+                                Color32::from_rgb(76, 136, 206),
+                            )
+                            .clicked()
+                            {
+                                self.start_shell_tool(
+                                    "Installing LuaTools (Rafie-kun)...",
+                                    "curl -fsSL https://raw.githubusercontent.com/Rafie-kun/luatools-moon/main/install.sh | bash && mkdir -p \"$HOME/.cache/steamrollbackr\" && printf rafie > \"$HOME/.cache/steamrollbackr/luatools_moon_fork\"",
+                                );
+                            }
                         }
                     });
-                });
 
-                ui.add_space(10.0);
+                    ui.add_space(8.0);
 
-                // Tool 3: LuaTools (mrpinkguy / luatools-linux)
-                card_frame().show(ui, |ui| {
-                    ui.set_width(ui.available_width());
-                    ui.horizontal(|ui| {
-                        ui.label(
-                            RichText::new(t.luatools_linux_title)
-                                .font(bold_font.clone())
-                                .color(Color32::WHITE),
+                    // Option B: swwayps / luatools-moon
+                    option_frame(swwayps_installed).show(ui, |ui| {
+                        ui.set_width(ui.available_width());
+                        ui.horizontal(|ui| {
+                            ui.label(
+                                RichText::new(t.luatools_moon_title)
+                                    .strong()
+                                    .color(Color32::WHITE),
+                            );
+                            if swwayps_installed {
+                                ui.add_space(4.0);
+                                pill_badge(ui, t.active_pill, green_bg, green_fg);
+                            }
+                        });
+                        ui.add_space(4.0);
+                        ui.add(
+                            egui::Label::new(
+                                RichText::new(t.luatools_moon_desc)
+                                    .size(12.5)
+                                    .color(Color32::LIGHT_GRAY),
+                            )
+                            .wrap(),
                         );
-                        ui.add_space(6.0);
+                        ui.add_space(8.0);
+                        if swwayps_installed {
+                            ui.columns(2, |cols| {
+                                if tool_btn(
+                                    &mut cols[0],
+                                    t.reinstall_btn,
+                                    !self.busy,
+                                    Color32::from_rgb(56, 60, 68),
+                                    Color32::from_rgb(92, 96, 108),
+                                )
+                                .clicked()
+                                {
+                                    self.start_shell_tool(
+                                        "Reinstalling LuaTools (swwayps)...",
+                                        "curl -fsSL https://raw.githubusercontent.com/swwayps/luatools-moon/main/install.sh | bash && mkdir -p \"$HOME/.cache/steamrollbackr\" && printf swwayps > \"$HOME/.cache/steamrollbackr/luatools_moon_fork\"",
+                                    );
+                                }
+                                if tool_btn(
+                                    &mut cols[1],
+                                    t.uninstall_btn,
+                                    !self.busy,
+                                    Color32::from_rgb(122, 40, 40),
+                                    Color32::from_rgb(184, 72, 72),
+                                )
+                                .clicked()
+                                {
+                                    self.start_shell_tool(
+                                        "Uninstalling LuaTools (swwayps)...",
+                                        "curl -fsSL https://raw.githubusercontent.com/swwayps/luatools-moon/main/uninstall.sh | bash; rm -f \"$HOME/.cache/steamrollbackr/luatools_moon_fork\"",
+                                    );
+                                }
+                            });
+                        } else {
+                            let btn_label = if rafie_installed {
+                                t.switch_btn
+                            } else {
+                                t.install_btn
+                            };
+                            if tool_btn(
+                                ui,
+                                btn_label,
+                                !self.busy,
+                                Color32::from_rgb(42, 88, 142),
+                                Color32::from_rgb(76, 136, 206),
+                            )
+                            .clicked()
+                            {
+                                self.start_shell_tool(
+                                    "Installing LuaTools (swwayps)...",
+                                    "curl -fsSL https://raw.githubusercontent.com/swwayps/luatools-moon/main/install.sh | bash && mkdir -p \"$HOME/.cache/steamrollbackr\" && printf swwayps > \"$HOME/.cache/steamrollbackr/luatools_moon_fork\"",
+                                );
+                            }
+                        }
+                    });
+
+                    ui.add_space(8.0);
+
+                    // Option C: mrpinkguy / luatools-linux (standalone)
+                    option_frame(luatools_linux_installed).show(ui, |ui| {
+                        ui.set_width(ui.available_width());
+                        ui.horizontal(|ui| {
+                            ui.label(
+                                RichText::new(t.luatools_linux_title)
+                                    .strong()
+                                    .color(Color32::WHITE),
+                            );
+                            if luatools_linux_installed {
+                                ui.add_space(4.0);
+                                pill_badge(ui, t.active_pill, green_bg, green_fg);
+                            }
+                        });
+                        ui.add_space(4.0);
+                        ui.add(
+                            egui::Label::new(
+                                RichText::new(t.luatools_linux_desc)
+                                    .size(12.5)
+                                    .color(Color32::LIGHT_GRAY),
+                            )
+                            .wrap(),
+                        );
+                        ui.add_space(8.0);
                         if luatools_linux_installed {
-                            pill_badge(ui, t.installed_pill, green_bg, green_fg);
-                        } else {
-                            pill_badge(
-                                ui,
-                                t.not_found_pill,
-                                Color32::from_rgb(54, 54, 58),
-                                Color32::GRAY,
-                            );
-                        }
-                    });
-                    ui.add_space(6.0);
-                    ui.add(
-                        egui::Label::new(
-                            RichText::new(t.luatools_linux_desc).color(Color32::LIGHT_GRAY),
-                        )
-                        .wrap(),
-                    );
-                    ui.add_space(10.0);
-                    ui.columns(3, |cols| {
-                        let can_install = !self.busy && !luatools_linux_installed;
-                        let can_uninstall = !self.busy && luatools_linux_installed;
-                        if tool_btn(
-                            &mut cols[0],
+                            ui.columns(3, |cols| {
+                                if tool_btn(
+                                    &mut cols[0],
+                                    t.reinstall_btn,
+                                    !self.busy,
+                                    Color32::from_rgb(56, 60, 68),
+                                    Color32::from_rgb(92, 96, 108),
+                                )
+                                .clicked()
+                                {
+                                    self.start_shell_tool(
+                                        "Reinstalling LuaTools (mrpinkguy)...",
+                                        "curl -fsSL https://gitlab.com/mrpinkguyjp/luatools-linux/-/raw/main/scripts/install.sh | sh",
+                                    );
+                                }
+                                if tool_btn(
+                                    &mut cols[1],
+                                    t.uninstall_btn,
+                                    !self.busy,
+                                    Color32::from_rgb(122, 40, 40),
+                                    Color32::from_rgb(184, 72, 72),
+                                )
+                                .clicked()
+                                {
+                                    self.start_shell_tool(
+                                        "Uninstalling LuaTools (mrpinkguy, keeping settings)...",
+                                        "curl -fsSL https://gitlab.com/mrpinkguyjp/luatools-linux/-/raw/main/scripts/install.sh | sh -s -- --uninstall",
+                                    );
+                                }
+                                if tool_btn(
+                                    &mut cols[2],
+                                    t.uninstall_purge_btn,
+                                    !self.busy,
+                                    Color32::from_rgb(142, 32, 32),
+                                    Color32::from_rgb(206, 68, 68),
+                                )
+                                .clicked()
+                                {
+                                    self.start_shell_tool(
+                                        "Uninstalling and purging LuaTools (mrpinkguy)...",
+                                        "curl -fsSL https://gitlab.com/mrpinkguyjp/luatools-linux/-/raw/main/scripts/install.sh | sh -s -- --uninstall --purge",
+                                    );
+                                }
+                            });
+                        } else if tool_btn(
+                            ui,
                             t.install_btn,
-                            can_install,
+                            !self.busy,
                             Color32::from_rgb(42, 88, 142),
                             Color32::from_rgb(76, 136, 206),
                         )
@@ -2180,49 +2531,8 @@ impl SteamRollbackrApp {
                                 "curl -fsSL https://gitlab.com/mrpinkguyjp/luatools-linux/-/raw/main/scripts/install.sh | sh",
                             );
                         }
-                        if tool_btn(
-                            &mut cols[1],
-                            t.uninstall_btn,
-                            can_uninstall,
-                            Color32::from_rgb(122, 40, 40),
-                            Color32::from_rgb(184, 72, 72),
-                        )
-                        .clicked()
-                        {
-                            self.start_shell_tool(
-                                "Uninstalling LuaTools (mrpinkguy, keeping settings)...",
-                                "curl -fsSL https://gitlab.com/mrpinkguyjp/luatools-linux/-/raw/main/scripts/install.sh | sh -s -- --uninstall",
-                            );
-                        }
-                        if tool_btn(
-                            &mut cols[2],
-                            t.uninstall_purge_btn,
-                            can_uninstall,
-                            Color32::from_rgb(142, 32, 32),
-                            Color32::from_rgb(206, 68, 68),
-                        )
-                        .clicked()
-                        {
-                            self.start_shell_tool(
-                                "Uninstalling and purging LuaTools (mrpinkguy)...",
-                                "curl -fsSL https://gitlab.com/mrpinkguyjp/luatools-linux/-/raw/main/scripts/install.sh | sh -s -- --uninstall --purge",
-                            );
-                        }
                     });
                 });
-
-                if self.busy {
-                    ui.add_space(10.0);
-                    ui.horizontal(|ui| {
-                        ui.spinner();
-                        ui.label(RichText::new(t.working).strong());
-                        if let Some(last) = self.logs.last() {
-                            ui.label(
-                                RichText::new(format!("— {last}")).color(Color32::LIGHT_GRAY),
-                            );
-                        }
-                    });
-                }
             });
     }
 
@@ -2293,7 +2603,7 @@ impl SteamRollbackrApp {
         ui.add_space(10.0);
 
         card_frame().show(ui, |ui| {
-            egui::ScrollArea::vertical()
+                egui::ScrollArea::vertical()
                 .id_salt("activity_log_scroll")
                 .stick_to_bottom(true)
                 .auto_shrink([false, false])
@@ -2316,6 +2626,7 @@ impl eframe::App for SteamRollbackrApp {
         let t = texts(self.lang);
 
         self.render_sidebar(ctx, &t);
+        self.render_tools_flyout_tip(ctx, &t);
 
         egui::CentralPanel::default()
             .frame(

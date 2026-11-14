@@ -79,8 +79,7 @@ fn read_lumen_versions() -> LumenVersions {
     };
     let slssteam_installed = home.join(".local/share/SLSsteam/SLSsteam.so").is_file();
     let lumen_installed = home.join(".local/share/Lumen/lumen").is_file();
-    let luatools_installed =
-        home.join(".local/share/LuaTools").is_dir() || home.join(".local/share/Lumen/luatools").is_dir();
+    let luatools_installed = home.join(".local/share/Lumen/luatools").is_dir();
 
     let mut out = LumenVersions {
         slssteam_installed,
@@ -709,6 +708,16 @@ pub fn is_luatools_linux_installed() -> bool {
     std::env::var_os("HOME")
         .map(|h| PathBuf::from(h).join(".local/bin/luatools").is_file())
         .unwrap_or(false)
+}
+
+/// Returns which luatools-moon fork ("rafie" or "swwayps") was installed via SteamRollbackr.
+pub fn read_luatools_moon_fork() -> Option<String> {
+    let home = std::env::var_os("HOME").map(PathBuf::from)?;
+    let path = home.join(".cache/steamrollbackr/luatools_moon_fork");
+    std::fs::read_to_string(path)
+        .ok()
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty())
 }
 
 /// Runs a shell command via `sh -c` and streams combined output lines to `log`.
