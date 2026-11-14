@@ -17,6 +17,31 @@ Works on most Linux distributions (Bazzite, SteamOS, Mint, Ubuntu, Fedora, Arch)
 
 ## Installation
 
+Download the package for your system from the [Releases](https://github.com/foodiemonster/SteamRollbackr/releases) page:
+
+### AppImage (Recommended — SteamOS, Bazzite, and all distros)
+1. Download `SteamRollbackr-<version>-x86_64.AppImage`.
+2. Right-click the file -> **Properties** -> enable **Executable as Program** (or run `chmod +x SteamRollbackr-*-x86_64.AppImage`).
+3. Double-click to launch.
+
+### Debian / Ubuntu / Linux Mint (`.deb`)
+Download `steamrollbackr_<version>_amd64.deb` and double-click it to install via your Software Center, or run:
+```bash
+sudo apt install ./steamrollbackr_*_amd64.deb
+```
+
+### Fedora / openSUSE (`.rpm`)
+Download `steamrollbackr-<version>-1.x86_64.rpm` and double-click it to install via Software / Discover, or run:
+```bash
+sudo dnf install ./steamrollbackr-*.x86_64.rpm
+```
+
+### One-Line Installer (No Root Required)
+```bash
+curl -fsSL https://raw.githubusercontent.com/foodiemonster/SteamRollbackr/main/packaging/web-install.sh | bash
+```
+
+### Tarball
 1. Download `steamrollbackr-linux-x86_64.tar.gz` from the [Releases](https://github.com/foodiemonster/SteamRollbackr/releases) page.
 2. Extract and run the installer:
 

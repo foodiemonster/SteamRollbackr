@@ -1,9 +1,9 @@
-name: Release
+name: Release Packages
 
 on:
   push:
     tags:
-      - "v*"
+      - 'v*'
   workflow_dispatch:
 
 permissions:
@@ -11,23 +11,124 @@ permissions:
 
 jobs:
   build-linux:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Run tests
+        run: cargo test
+
       - name: Build release binary
         run: cargo build --release
-      - name: Package tarball
+
+      - name: Determine version
+        id: ver
         run: |
-          mkdir -p dist
-          cp target/release/steamrollbackr dist/
-          cp packaging/steamrollbackr.desktop dist/
-          cp packaging/steamrollbackr.png dist/
-          cp install.sh dist/
-          cp README.md dist/
-          tar -czf steamrollbackr-linux-x86_64.tar.gz -C dist .
-      - name: Upload Release Asset
-        if: startsWith(github.ref, 'refs/tags/')
+          if [[ "${{ github.ref }}" == refs/tags/v* ]]; then
+            echo "version=${GITHUB_REF_NAME#v}" >> "$GITHUB_OUTPUT"
+          else
+            echo "version=0.5.0" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Build tarball
+        run: |
+          mkdir -p dist/pkg
+          cp target/release/steamrollbackr dist/pkg/
+          cp packaging/steamrollbackr.desktop dist/pkg/
+          cp packaging/steamrollbackr.png dist/pkg/
+          cp install.sh dist/pkg/
+          cp README.md dist/pkg/
+          tar -czf dist/steamrollbackr-linux-x86_64.tar.gz -C dist/pkg .
+          rm -rf dist/pkg
+
+      - name: Build .deb package
+        run: |
+          VER="${{ steps.ver.outputs.version }}"
+          DEB_DIR="dist/deb_pkg"
+          mkdir -p "$DEB_DIR/DEBIAN" \
+                   "$DEB_DIR/usr/bin" \
+                   "$DEB_DIR/usr/share/applications" \
+                   "$DEB_DIR/usr/share/icons/hicolor/256x256/apps"
+          install -Dm755 target/release/steamrollbackr "$DEB_DIR/usr/bin/steamrollbackr"
+          install -Dm644 packaging/steamrollbackr.desktop "$DEB_DIR/usr/share/applications/steamrollbackr.desktop"
+          install -Dm644 packaging/steamrollbackr.png "$DEB_DIR/usr/share/icons/hicolor/256x256/apps/steamrollbackr.png"
+          cat > "$DEB_DIR/DEBIAN/control" <<EOF
+          Package: steamrollbackr
+          Version: $VER
+          Section: utils
+          Priority: optional
+          Architecture: amd64
+          Maintainer: foodiemonster
+          Description: Cross-distro Linux GUI utility to roll back the Steam client and lock/unlock updates
+          EOF
+          dpkg-deb --build "$DEB_DIR" "dist/steamrollbackr_${VER}_amd64.deb"
+          rm -rf "$DEB_DIR"
+
+      - name: Build .rpm package
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y rpm
+          VER="${{ steps.ver.outputs.version }}"
+          RPM_TOP="$(pwd)/dist/rpmbuild"
+          mkdir -p "$RPM_TOP"/{BUILD,RPMS,SOURCES,SPECS,SRPMS,BUILDROOT}
+          cat > "$RPM_TOP/SPECS/steamrollbackr.spec" <<EOF
+          Name:           steamrollbackr
+          Version:        $VER
+          Release:        1
+          Summary:        Roll back the Steam Linux client and lock/unlock updates
+          License:        MIT
+          BuildArch:      x86_64
+          AutoReqProv:    no
+
+          %description
+          Cross-distro Linux GUI utility to roll back the Steam client and lock/unlock updates.
+
+          %install
+          install -Dm755 $(pwd)/target/release/steamrollbackr %{buildroot}/usr/bin/steamrollbackr
+          install -Dm644 $(pwd)/packaging/steamrollbackr.desktop %{buildroot}/usr/share/applications/steamrollbackr.desktop
+          install -Dm644 $(pwd)/packaging/steamrollbackr.png %{buildroot}/usr/share/icons/hicolor/256x256/apps/steamrollbackr.png
+
+          %files
+          /usr/bin/steamrollbackr
+          /usr/share/applications/steamrollbackr.desktop
+          /usr/share/icons/hicolor/256x256/apps/steamrollbackr.png
+          EOF
+          rpmbuild --define "_topdir $RPM_TOP" -bb "$RPM_TOP/SPECS/steamrollbackr.spec"
+          cp "$RPM_TOP/RPMS/x86_64/steamrollbackr-${VER}-1.x86_64.rpm" dist/
+          rm -rf "$RPM_TOP"
+
+      - name: Build .AppImage
+        run: |
+          VER="${{ steps.ver.outputs.version }}"
+          APP_DIR="dist/AppDir"
+          mkdir -p "$APP_DIR/usr/bin"
+          install -Dm755 target/release/steamrollbackr "$APP_DIR/usr/bin/steamrollbackr"
+          install -Dm644 packaging/steamrollbackr.desktop "$APP_DIR/steamrollbackr.desktop"
+          install -Dm644 packaging/steamrollbackr.png "$APP_DIR/steamrollbackr.png"
+          ln -sf steamrollbackr.png "$APP_DIR/.DirIcon"
+          cat > "$APP_DIR/AppRun" <<'EOF'
+          #!/bin/sh
+          HERE="$(dirname "$(readlink -f "$0")")"
+          exec "$HERE/usr/bin/steamrollbackr" "$@"
+          EOF
+          chmod +x "$APP_DIR/AppRun"
+
+          curl -fsSL "https://github.com/AppImage/appimagetool/releases/download/continuous/appimagetool-x86_64.AppImage" -o dist/appimagetool
+          chmod +x dist/appimagetool
+          ARCH=x86_64 dist/appimagetool --appimage-extract-and-run "$APP_DIR" "dist/SteamRollbackr-${VER}-x86_64.AppImage"
+          rm -rf "$APP_DIR" dist/appimagetool
+
+      - name: Create or update GitHub Release
+        if: startsWith(github.ref, 'refs/tags/v')
         uses: softprops/action-gh-release@v2
         with:
-          files: steamrollbackr-linux-x86_64.tar.gz
+          files: |
+            dist/steamrollbackr-linux-x86_64.tar.gz
+            dist/steamrollbackr_*.deb
+            dist/steamrollbackr-*.rpm
+            dist/SteamRollbackr-*-x86_64.AppImage
+          generate_release_notes: true
