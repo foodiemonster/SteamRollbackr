@@ -455,6 +455,60 @@ pub fn install_libcrypto3(steam_dir: &Path, log: &mut dyn FnMut(&str)) -> Result
     Ok(())
 }
 
+/// Removes the copied 32-bit libcrypto.so.3 from ubuntu12_32/.
+pub fn uninstall_libcrypto3(steam_dir: &Path, log: &mut dyn FnMut(&str)) -> Result<(), String> {
+    let dest = steam_dir.join("ubuntu12_32/libcrypto.so.3");
+    if !dest.exists() {
+        log("32-bit libcrypto.so.3 is not present in ubuntu12_32/.");
+        return Ok(());
+    }
+    fs::remove_file(&dest)
+        .map_err(|e| format!("Failed to remove {}: {e}", dest.display()))?;
+    log(&format!("Removed {}", dest.display()));
+    Ok(())
+}
+
+/// Checks if mrpinkguyjp's luatools-linux is installed under ~/.local/bin/luatools.
+pub fn is_luatools_linux_installed() -> bool {
+    std::env::var_os("HOME")
+        .map(|h| PathBuf::from(h).join(".local/bin/luatools").is_file())
+        .unwrap_or(false)
+}
+
+/// Runs a shell command via `sh -c` and streams combined output lines to `log`.
+pub fn run_shell_command(cmd: &str, log: &mut dyn FnMut(&str)) -> Result<(), String> {
+    use std::io::{BufRead, BufReader};
+    use std::process::Stdio;
+
+    log(&format!("Running: {cmd}"));
+    let mut child = Command::new("sh")
+        .arg("-c")
+        .arg(format!("{cmd} 2>&1"))
+        .stdout(Stdio::piped())
+        .spawn()
+        .map_err(|e| format!("Failed to launch shell command: {e}"))?;
+
+    if let Some(stdout) = child.stdout.take() {
+        let reader = BufReader::new(stdout);
+        for line in reader.lines().map_while(Result::ok) {
+            let trimmed = line.trim();
+            if !trimmed.is_empty() {
+                log(trimmed);
+            }
+        }
+    }
+
+    let status = child
+        .wait()
+        .map_err(|e| format!("Failed waiting for command: {e}"))?;
+    if status.success() {
+        log("Command completed successfully.");
+        Ok(())
+    } else {
+        Err(format!("Command exited with status: {status}"))
+    }
+}
+
 /// Rolls back Steam to a specific manifest (served via local HTTP server) and locks updates.
 pub fn rollback_to_manifest(
     steam_dir: &Path,

@@ -6,9 +6,9 @@ use crate::history::{fetch_manifest_content, fetch_releases, ReleaseEntry};
 use crate::i18n::{draw_flag, texts, Language, Texts};
 use crate::slssteam::{check_slsteam_moon, find_best_compatible_release, SlsMoonStatus};
 use crate::steam::{
-    inspect_steam, inspect_steam_with_override, install_libcrypto3, lock_only, restart_steam,
-    rollback_to_manifest, unlock_and_update_steam, unlock_updates, LockState, ManifestChannel,
-    SteamStatus,
+    inspect_steam, inspect_steam_with_override, install_libcrypto3, is_luatools_linux_installed,
+    lock_only, restart_steam, rollback_to_manifest, run_shell_command, uninstall_libcrypto3,
+    unlock_and_update_steam, unlock_updates, LockState, ManifestChannel, SteamStatus,
 };
 use std::path::PathBuf;
 
@@ -619,6 +619,38 @@ impl SteamRollbackrApp {
         let tx = self.tx.clone();
         thread::spawn(move || {
             let res = install_libcrypto3(&steam_dir, &mut |msg| {
+                let _ = tx.send(BgEvent::Log(msg.to_string()));
+            });
+            let _ = tx.send(BgEvent::ActionFinished(res));
+        });
+    }
+
+    fn start_uninstall_libcrypto3(&mut self) {
+        let Some(steam_dir) = self.status.steam_dir.clone() else {
+            return;
+        };
+        self.busy = true;
+        self.initial_ready_only = false;
+        self.logs.clear();
+        self.logs.push("Removing 32-bit libcrypto.so.3...".to_string());
+        let tx = self.tx.clone();
+        thread::spawn(move || {
+            let res = uninstall_libcrypto3(&steam_dir, &mut |msg| {
+                let _ = tx.send(BgEvent::Log(msg.to_string()));
+            });
+            let _ = tx.send(BgEvent::ActionFinished(res));
+        });
+    }
+
+    fn start_shell_tool(&mut self, start_log: &str, cmd: &str) {
+        self.busy = true;
+        self.initial_ready_only = false;
+        self.logs.clear();
+        self.logs.push(start_log.to_string());
+        let cmd_owned = cmd.to_string();
+        let tx = self.tx.clone();
+        thread::spawn(move || {
+            let res = run_shell_command(&cmd_owned, &mut |msg| {
                 let _ = tx.send(BgEvent::Log(msg.to_string()));
             });
             let _ = tx.send(BgEvent::ActionFinished(res));
@@ -1805,69 +1837,45 @@ impl SteamRollbackrApp {
             .steam_dir
             .as_ref()
             .is_some_and(|d| d.join("ubuntu12_32/libcrypto.so.3").is_file());
+        let luatools_moon_installed = self.status.lumen_versions.luatools_installed
+            || self.status.lumen_versions.luatools.is_some();
+        let luatools_linux_installed = is_luatools_linux_installed();
 
-        card_frame().show(ui, |ui| {
-            ui.set_width(ui.available_width());
-            ui.horizontal(|ui| {
-                ui.label(
-                    RichText::new(t.libcrypto_title)
-                        .size(15.5)
-                        .strong()
-                        .color(Color32::WHITE),
-                );
-                ui.add_space(6.0);
-                if libcrypto_installed {
-                    pill_badge(
-                        ui,
-                        t.installed_pill,
-                        Color32::from_rgb(35, 77, 46),
-                        Color32::from_rgb(130, 230, 155),
-                    );
-                } else {
-                    pill_badge(
-                        ui,
-                        t.missing_pill,
-                        Color32::from_rgb(82, 36, 36),
-                        Color32::from_rgb(245, 150, 150),
-                    );
-                }
-            });
+        let bold_font = egui::FontId::new(15.5, egui::FontFamily::Name("fluent_bold".into()));
+        let green_bg = Color32::from_rgb(35, 77, 46);
+        let green_fg = Color32::from_rgb(130, 230, 155);
+        let red_bg = Color32::from_rgb(82, 36, 36);
+        let red_fg = Color32::from_rgb(245, 150, 150);
 
-            ui.add_space(6.0);
-            ui.add(
-                egui::Label::new(RichText::new(t.libcrypto_desc).color(Color32::LIGHT_GRAY))
-                    .wrap(),
-            );
-            ui.add_space(10.0);
-
-            let can_run = has_steam && !self.busy;
-            let fg = if can_run {
+        let tool_btn = |ui: &mut egui::Ui,
+                        label: &str,
+                        enabled: bool,
+                        fill: Color32,
+                        stroke: Color32|
+         -> egui::Response {
+            let fg = if enabled {
                 Color32::WHITE
             } else {
                 Color32::from_rgb(130, 134, 140)
             };
             let btn = egui::Button::new("")
-                .fill(if can_run {
-                    Color32::from_rgb(42, 88, 142)
+                .fill(if enabled {
+                    fill
                 } else {
                     Color32::from_rgb(48, 50, 56)
                 })
                 .stroke(Stroke::new(
                     1.0_f32,
-                    if can_run {
-                        Color32::from_rgb(76, 136, 206)
+                    if enabled {
+                        stroke
                     } else {
                         Color32::from_rgb(64, 66, 72)
                     },
                 ))
-                .min_size(Vec2::new(240.0, 36.0));
-            let resp = ui.add_enabled(can_run, btn);
+                .min_size(Vec2::new(ui.available_width(), 34.0));
+            let resp = ui.add_enabled(enabled, btn);
             let galley = ui.fonts(|f| {
-                f.layout_no_wrap(
-                    t.libcrypto_btn.to_string(),
-                    egui::FontId::proportional(14.0),
-                    fg,
-                )
+                f.layout_no_wrap(label.to_string(), egui::FontId::proportional(14.0), fg)
             });
             ui.painter().galley(
                 egui::pos2(
@@ -1877,21 +1885,216 @@ impl SteamRollbackrApp {
                 galley,
                 fg,
             );
-            if resp.clicked() {
-                self.start_install_libcrypto3();
-            }
+            resp
+        };
 
-            if self.busy {
-                ui.add_space(10.0);
-                ui.horizontal(|ui| {
-                    ui.spinner();
-                    ui.label(RichText::new(t.working).strong());
-                    if let Some(last) = self.logs.last() {
-                        ui.label(RichText::new(format!("— {last}")).color(Color32::LIGHT_GRAY));
-                    }
+        egui::ScrollArea::vertical()
+            .id_salt("tools_scroll")
+            .auto_shrink([false, false])
+            .show(ui, |ui| {
+                // Tool 1: 32-bit libcrypto.so.3
+                card_frame().show(ui, |ui| {
+                    ui.set_width(ui.available_width());
+                    ui.horizontal(|ui| {
+                        ui.label(RichText::new(t.libcrypto_title).font(bold_font.clone()).color(Color32::WHITE));
+                        ui.add_space(6.0);
+                        if libcrypto_installed {
+                            pill_badge(ui, t.installed_pill, green_bg, green_fg);
+                        } else {
+                            pill_badge(ui, t.missing_pill, red_bg, red_fg);
+                        }
+                    });
+                    ui.add_space(6.0);
+                    ui.add(
+                        egui::Label::new(RichText::new(t.libcrypto_desc).color(Color32::LIGHT_GRAY))
+                            .wrap(),
+                    );
+                    ui.add_space(10.0);
+                    ui.columns(2, |cols| {
+                        let can_install = has_steam && !self.busy && !libcrypto_installed;
+                        let can_uninstall = has_steam && !self.busy && libcrypto_installed;
+                        if tool_btn(
+                            &mut cols[0],
+                            t.install_btn,
+                            can_install,
+                            Color32::from_rgb(42, 88, 142),
+                            Color32::from_rgb(76, 136, 206),
+                        )
+                        .clicked()
+                        {
+                            self.start_install_libcrypto3();
+                        }
+                        if tool_btn(
+                            &mut cols[1],
+                            t.uninstall_btn,
+                            can_uninstall,
+                            Color32::from_rgb(122, 40, 40),
+                            Color32::from_rgb(184, 72, 72),
+                        )
+                        .clicked()
+                        {
+                            self.start_uninstall_libcrypto3();
+                        }
+                    });
                 });
-            }
-        });
+
+                ui.add_space(10.0);
+
+                // Tool 2: LuaTools (swwayps / luatools-moon)
+                card_frame().show(ui, |ui| {
+                    ui.set_width(ui.available_width());
+                    ui.horizontal(|ui| {
+                        ui.label(
+                            RichText::new(t.luatools_moon_title)
+                                .font(bold_font.clone())
+                                .color(Color32::WHITE),
+                        );
+                        ui.add_space(6.0);
+                        if luatools_moon_installed {
+                            pill_badge(ui, t.installed_pill, green_bg, green_fg);
+                        } else {
+                            pill_badge(
+                                ui,
+                                t.not_found_pill,
+                                Color32::from_rgb(54, 54, 58),
+                                Color32::GRAY,
+                            );
+                        }
+                    });
+                    ui.add_space(6.0);
+                    ui.add(
+                        egui::Label::new(
+                            RichText::new(t.luatools_moon_desc).color(Color32::LIGHT_GRAY),
+                        )
+                        .wrap(),
+                    );
+                    ui.add_space(10.0);
+                    ui.columns(2, |cols| {
+                        let can_install = !self.busy && !luatools_moon_installed;
+                        let can_uninstall = !self.busy && luatools_moon_installed;
+                        if tool_btn(
+                            &mut cols[0],
+                            t.install_btn,
+                            can_install,
+                            Color32::from_rgb(42, 88, 142),
+                            Color32::from_rgb(76, 136, 206),
+                        )
+                        .clicked()
+                        {
+                            self.start_shell_tool(
+                                "Installing LuaTools (swwayps)...",
+                                "curl -fsSL https://raw.githubusercontent.com/swwayps/luatools-moon/main/install.sh | bash",
+                            );
+                        }
+                        if tool_btn(
+                            &mut cols[1],
+                            t.uninstall_btn,
+                            can_uninstall,
+                            Color32::from_rgb(122, 40, 40),
+                            Color32::from_rgb(184, 72, 72),
+                        )
+                        .clicked()
+                        {
+                            self.start_shell_tool(
+                                "Uninstalling LuaTools (swwayps)...",
+                                "curl -fsSL https://raw.githubusercontent.com/swwayps/luatools-moon/main/uninstall.sh | bash",
+                            );
+                        }
+                    });
+                });
+
+                ui.add_space(10.0);
+
+                // Tool 3: LuaTools (mrpinkguy / luatools-linux)
+                card_frame().show(ui, |ui| {
+                    ui.set_width(ui.available_width());
+                    ui.horizontal(|ui| {
+                        ui.label(
+                            RichText::new(t.luatools_linux_title)
+                                .font(bold_font.clone())
+                                .color(Color32::WHITE),
+                        );
+                        ui.add_space(6.0);
+                        if luatools_linux_installed {
+                            pill_badge(ui, t.installed_pill, green_bg, green_fg);
+                        } else {
+                            pill_badge(
+                                ui,
+                                t.not_found_pill,
+                                Color32::from_rgb(54, 54, 58),
+                                Color32::GRAY,
+                            );
+                        }
+                    });
+                    ui.add_space(6.0);
+                    ui.add(
+                        egui::Label::new(
+                            RichText::new(t.luatools_linux_desc).color(Color32::LIGHT_GRAY),
+                        )
+                        .wrap(),
+                    );
+                    ui.add_space(10.0);
+                    ui.columns(3, |cols| {
+                        let can_install = !self.busy && !luatools_linux_installed;
+                        let can_uninstall = !self.busy && luatools_linux_installed;
+                        if tool_btn(
+                            &mut cols[0],
+                            t.install_btn,
+                            can_install,
+                            Color32::from_rgb(42, 88, 142),
+                            Color32::from_rgb(76, 136, 206),
+                        )
+                        .clicked()
+                        {
+                            self.start_shell_tool(
+                                "Installing LuaTools (mrpinkguy)...",
+                                "curl -fsSL https://gitlab.com/mrpinkguyjp/luatools-linux/-/raw/main/scripts/install.sh | sh",
+                            );
+                        }
+                        if tool_btn(
+                            &mut cols[1],
+                            t.uninstall_btn,
+                            can_uninstall,
+                            Color32::from_rgb(122, 40, 40),
+                            Color32::from_rgb(184, 72, 72),
+                        )
+                        .clicked()
+                        {
+                            self.start_shell_tool(
+                                "Uninstalling LuaTools (mrpinkguy, keeping settings)...",
+                                "curl -fsSL https://gitlab.com/mrpinkguyjp/luatools-linux/-/raw/main/scripts/install.sh | sh -s -- --uninstall",
+                            );
+                        }
+                        if tool_btn(
+                            &mut cols[2],
+                            t.uninstall_purge_btn,
+                            can_uninstall,
+                            Color32::from_rgb(142, 32, 32),
+                            Color32::from_rgb(206, 68, 68),
+                        )
+                        .clicked()
+                        {
+                            self.start_shell_tool(
+                                "Uninstalling and purging LuaTools (mrpinkguy)...",
+                                "curl -fsSL https://gitlab.com/mrpinkguyjp/luatools-linux/-/raw/main/scripts/install.sh | sh -s -- --uninstall --purge",
+                            );
+                        }
+                    });
+                });
+
+                if self.busy {
+                    ui.add_space(10.0);
+                    ui.horizontal(|ui| {
+                        ui.spinner();
+                        ui.label(RichText::new(t.working).strong());
+                        if let Some(last) = self.logs.last() {
+                            ui.label(
+                                RichText::new(format!("— {last}")).color(Color32::LIGHT_GRAY),
+                            );
+                        }
+                    });
+                }
+            });
     }
 
     fn render_troubleshooting(&self, ui: &mut egui::Ui, t: &Texts) {
