@@ -801,55 +801,75 @@ impl SteamRollbackrApp {
                 // Bottom utilities
                 ui.with_layout(egui::Layout::bottom_up(egui::Align::LEFT), |ui| {
                     ui.add_space(4.0);
-                    // Language selector
-                    ui.horizontal(|ui| {
-                        ui.add_space(12.0);
-                        let popup_id = ui.make_persistent_id("lang_dropdown_popup");
-                        let (rect, resp) =
-                            ui.allocate_exact_size(Vec2::new(18.0, 12.0), egui::Sense::click());
-                        draw_flag(ui.painter(), rect, self.lang);
-                        let label_resp = ui.add(
-                            egui::Button::new(
-                                RichText::new(self.lang.name())
-                                    .size(14.0)
-                                    .color(Color32::LIGHT_GRAY),
-                            )
-                            .fill(Color32::TRANSPARENT)
-                            .stroke(Stroke::NONE),
+                    // Language selector (single vertically-centered row matching sidebar items)
+                    let popup_id = ui.make_persistent_id("lang_dropdown_popup");
+                    let (row_rect, row_resp) = ui.allocate_exact_size(
+                        Vec2::new(ui.available_width(), 32.0),
+                        egui::Sense::click(),
+                    );
+                    if row_resp.hovered() {
+                        ui.painter().rect_filled(
+                            row_rect,
+                            Rounding::same(6.0),
+                            Color32::from_rgb(38, 38, 42),
                         );
-                        if resp.clicked() || label_resp.clicked() {
-                            ui.memory_mut(|mem| mem.toggle_popup(popup_id));
-                        }
+                    }
+                    let flag_rect = egui::Rect::from_center_size(
+                        egui::pos2(row_rect.left() + 20.0, row_rect.center().y),
+                        Vec2::new(18.0, 12.0),
+                    );
+                    draw_flag(ui.painter(), flag_rect, self.lang);
+                    ui.painter().text(
+                        egui::pos2(row_rect.left() + 36.0, row_rect.center().y),
+                        egui::Align2::LEFT_CENTER,
+                        self.lang.name(),
+                        egui::FontId::proportional(14.0),
+                        Color32::LIGHT_GRAY,
+                    );
+                    if row_resp.clicked() {
+                        ui.memory_mut(|mem| mem.toggle_popup(popup_id));
+                    }
 
-                        egui::popup_below_widget(
-                            ui,
-                            popup_id,
-                            &resp,
-                            PopupCloseBehavior::CloseOnClick,
-                            |ui| {
-                                ui.set_min_width(120.0);
-                                for lang_opt in Language::all() {
-                                    if lang_opt == self.lang {
-                                        continue;
-                                    }
-                                    ui.horizontal(|ui| {
-                                        let (r, flag_resp) = ui.allocate_exact_size(
-                                            Vec2::new(18.0, 12.0),
-                                            egui::Sense::click(),
-                                        );
-                                        draw_flag(ui.painter(), r, lang_opt);
-                                        let btn_resp = ui.selectable_label(
-                                            false,
-                                            RichText::new(lang_opt.name()).size(14.0),
-                                        );
-                                        if flag_resp.clicked() || btn_resp.clicked() {
-                                            self.set_language(lang_opt);
-                                        }
-                                    });
+                    egui::popup_below_widget(
+                        ui,
+                        popup_id,
+                        &row_resp,
+                        PopupCloseBehavior::CloseOnClick,
+                        |ui| {
+                            ui.set_min_width(130.0);
+                            for lang_opt in Language::all() {
+                                if lang_opt == self.lang {
+                                    continue;
                                 }
-                            },
-                        );
-                    });
+                                let (opt_rect, opt_resp) = ui.allocate_exact_size(
+                                    Vec2::new(ui.available_width(), 26.0),
+                                    egui::Sense::click(),
+                                );
+                                if opt_resp.hovered() {
+                                    ui.painter().rect_filled(
+                                        opt_rect,
+                                        Rounding::same(4.0),
+                                        Color32::from_rgb(46, 46, 52),
+                                    );
+                                }
+                                let r = egui::Rect::from_center_size(
+                                    egui::pos2(opt_rect.left() + 14.0, opt_rect.center().y),
+                                    Vec2::new(18.0, 12.0),
+                                );
+                                draw_flag(ui.painter(), r, lang_opt);
+                                ui.painter().text(
+                                    egui::pos2(opt_rect.left() + 30.0, opt_rect.center().y),
+                                    egui::Align2::LEFT_CENTER,
+                                    lang_opt.name(),
+                                    egui::FontId::proportional(14.0),
+                                    Color32::LIGHT_GRAY,
+                                );
+                                if opt_resp.clicked() {
+                                    self.set_language(lang_opt);
+                                }
+                            }
+                        },
+                    );
 
                     ui.separator();
                     let has_steam = self.status.steam_dir.is_some();
