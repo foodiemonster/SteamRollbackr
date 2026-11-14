@@ -48,6 +48,7 @@ pub struct SteamRollbackrApp {
     has_more: bool,
     loading_releases: bool,
     checking_moon: bool,
+    refresh_spin_start: Option<std::time::Instant>,
     moon_status: Option<Result<SlsMoonStatus, String>>,
     busy: bool,
     filter_text: String,
@@ -421,6 +422,7 @@ impl SteamRollbackrApp {
             has_more: true,
             loading_releases: false,
             checking_moon: false,
+            refresh_spin_start: Some(std::time::Instant::now()),
             moon_status: None,
             busy: false,
             filter_text: String::new(),
@@ -809,10 +811,20 @@ impl SteamRollbackrApp {
                         self.start_restart_steam();
                     }
 
-                    let is_refreshing = self.checking_moon || self.loading_releases;
-                    let spin_angle = if is_refreshing {
+                    let min_spin = 0.75_f32;
+                    let still_fetching = self.checking_moon || self.loading_releases;
+                    let spin_angle = if let Some(start) = self.refresh_spin_start {
+                        let e = start.elapsed().as_secs_f32();
+                        if still_fetching || e < min_spin {
+                            ui.ctx().request_repaint();
+                            e * (std::f32::consts::TAU / min_spin)
+                        } else {
+                            self.refresh_spin_start = None;
+                            0.0
+                        }
+                    } else if still_fetching {
                         ui.ctx().request_repaint();
-                        ui.ctx().input(|i| i.time as f32 * 6.0)
+                        ui.ctx().input(|i| i.time as f32) * (std::f32::consts::TAU / min_spin)
                     } else {
                         0.0
                     };
@@ -826,6 +838,7 @@ impl SteamRollbackrApp {
                     )
                     .clicked()
                     {
+                        self.refresh_spin_start = Some(std::time::Instant::now());
                         self.refresh_status();
                         self.check_moon();
                     }
