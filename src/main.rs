@@ -4,6 +4,7 @@ mod server;
 mod slssteam;
 mod steam;
 mod ui;
+mod updater;
 
 use eframe::egui;
 

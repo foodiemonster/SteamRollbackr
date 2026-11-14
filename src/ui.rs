@@ -10,6 +10,10 @@ use crate::steam::{
     lock_only, restart_steam, rollback_to_manifest, run_shell_command, uninstall_libcrypto3,
     unlock_and_update_steam, unlock_updates, LockState, ManifestChannel, SteamStatus,
 };
+use crate::updater::{
+    check_for_update, detect_install_kind, perform_update, InstallKind, UpdateInfo, UpdateOutcome,
+    CURRENT_VERSION,
+};
 use std::path::PathBuf;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -35,6 +39,8 @@ enum BgEvent {
     },
     Log(String),
     ActionFinished(Result<(), String>),
+    AppUpdateChecked(Result<Option<UpdateInfo>, String>),
+    AppUpdateFinished(Result<UpdateOutcome, String>),
 }
 
 pub struct SteamRollbackrApp {
@@ -48,6 +54,9 @@ pub struct SteamRollbackrApp {
     selected_idx: Option<usize>,
     details_entry: Option<ReleaseEntry>,
     confirm_restart: bool,
+    available_update: Option<UpdateInfo>,
+    show_update_popup: bool,
+    updating_app: bool,
     current_page: u32,
     has_more: bool,
     loading_releases: bool,
@@ -442,6 +451,9 @@ impl SteamRollbackrApp {
             selected_idx: None,
             details_entry: None,
             confirm_restart: false,
+            available_update: None,
+            show_update_popup: false,
+            updating_app: false,
             current_page: 1,
             has_more: true,
             loading_releases: false,
@@ -457,6 +469,7 @@ impl SteamRollbackrApp {
         };
         app.load_releases(1, true);
         app.check_moon();
+        app.check_app_update();
         app
     }
 
@@ -477,6 +490,30 @@ impl SteamRollbackrApp {
                 .map(|p| p.display().to_string())
                 .unwrap_or_default();
         }
+    }
+
+    fn check_app_update(&mut self) {
+        let tx = self.tx.clone();
+        thread::spawn(move || {
+            let res = check_for_update();
+            let _ = tx.send(BgEvent::AppUpdateChecked(res));
+        });
+    }
+
+    fn start_app_update(&mut self) {
+        let Some(info) = self.available_update.clone() else {
+            return;
+        };
+        self.updating_app = true;
+        self.initial_ready_only = false;
+        self.logs.push(format!("Starting SteamRollbackr update to {}...", info.latest_tag));
+        let tx = self.tx.clone();
+        thread::spawn(move || {
+            let res = perform_update(&info, &mut |msg| {
+                let _ = tx.send(BgEvent::Log(msg.to_string()));
+            });
+            let _ = tx.send(BgEvent::AppUpdateFinished(res));
+        });
     }
 
     fn check_moon(&mut self) {
@@ -791,6 +828,27 @@ impl SteamRollbackrApp {
                     self.refresh_status();
                     self.check_moon();
                 }
+                BgEvent::AppUpdateChecked(res) => {
+                    if let Ok(Some(info)) = res {
+                        self.available_update = Some(info);
+                        self.show_update_popup = true;
+                    }
+                }
+                BgEvent::AppUpdateFinished(res) => {
+                    self.updating_app = false;
+                    match res {
+                        Ok(UpdateOutcome::Relaunched) => {
+                            std::process::exit(0);
+                        }
+                        Ok(UpdateOutcome::OpenedReleasePage) => {
+                            self.show_update_popup = false;
+                        }
+                        Err(e) => {
+                            self.initial_ready_only = false;
+                            self.logs.push(format!("Update ERROR: {e}"));
+                        }
+                    }
+                }
             }
         }
     }
@@ -949,6 +1007,35 @@ impl SteamRollbackrApp {
                         self.check_moon();
                     }
                     ui.separator();
+
+                    if let Some(info) = self.available_update.clone() {
+                        ui.add_space(4.0);
+                        let (rect, resp) = ui.allocate_exact_size(
+                            Vec2::new(ui.available_width(), 32.0),
+                            egui::Sense::click(),
+                        );
+                        let bg = if resp.hovered() {
+                            Color32::from_rgb(42, 92, 68)
+                        } else {
+                            Color32::from_rgb(34, 72, 54)
+                        };
+                        ui.painter().rect(
+                            rect,
+                            Rounding::same(6.0),
+                            bg,
+                            Stroke::new(1.0_f32, Color32::from_rgb(66, 146, 106)),
+                        );
+                        ui.painter().text(
+                            egui::pos2(rect.left() + 10.0, rect.center().y),
+                            egui::Align2::LEFT_CENTER,
+                            format!("{} ({})", t.sidebar_update_available, info.latest_tag),
+                            egui::FontId::proportional(13.0),
+                            Color32::from_rgb(185, 245, 205),
+                        );
+                        if resp.clicked() {
+                            self.show_update_popup = true;
+                        }
+                    }
                 });
             });
     }
@@ -2298,6 +2385,84 @@ impl eframe::App for SteamRollbackrApp {
                 });
             if !open {
                 self.confirm_restart = false;
+            }
+        }
+
+        if self.show_update_popup {
+            if let Some(info) = self.available_update.clone() {
+                let mut open = true;
+                egui::Window::new(t.update_available_title)
+                    .open(&mut open)
+                    .collapsible(false)
+                    .resizable(false)
+                    .anchor(egui::Align2::CENTER_CENTER, Vec2::ZERO)
+                    .show(ctx, |ui| {
+                        let popup_w = 340.0;
+                        ui.set_width(popup_w);
+                        ui.add_space(4.0);
+                        ui.vertical_centered(|ui| {
+                            ui.label(RichText::new(t.update_available_msg).color(Color32::WHITE));
+                            ui.add_space(4.0);
+                            ui.label(
+                                RichText::new(format!(
+                                    "v{}  ->  {}",
+                                    CURRENT_VERSION, info.latest_tag
+                                ))
+                                .font(egui::FontId::new(
+                                    14.0,
+                                    egui::FontFamily::Name("fluent_bold".into()),
+                                ))
+                                .color(Color32::from_rgb(130, 230, 155)),
+                            );
+                        });
+                        ui.add_space(12.0);
+
+                        if self.updating_app {
+                            ui.horizontal(|ui| {
+                                ui.spinner();
+                                ui.label(RichText::new(t.updating_app).color(Color32::LIGHT_GRAY));
+                            });
+                            ui.add_space(4.0);
+                        } else {
+                            let side_margin = 6.0;
+                            let gap = 8.0;
+                            let btn_w = (popup_w - side_margin * 2.0 - gap) * 0.5;
+                            let primary_label = match detect_install_kind() {
+                                InstallKind::SystemPackage => t.update_open_page_btn,
+                                _ => t.update_now_btn,
+                            };
+
+                            ui.horizontal(|ui| {
+                                ui.spacing_mut().item_spacing.x = 0.0;
+                                ui.add_space(side_margin);
+                                let update_btn = egui::Button::new(
+                                    RichText::new(primary_label).color(Color32::WHITE),
+                                )
+                                .fill(Color32::from_rgb(38, 92, 66))
+                                .stroke(Stroke::new(1.0_f32, Color32::from_rgb(66, 146, 106)))
+                                .min_size(Vec2::new(btn_w, 32.0));
+                                if ui.add(update_btn).clicked() {
+                                    self.start_app_update();
+                                }
+
+                                ui.add_space(gap);
+
+                                let later_btn = egui::Button::new(
+                                    RichText::new(t.later_btn).color(Color32::WHITE),
+                                )
+                                .fill(Color32::from_rgb(122, 40, 40))
+                                .stroke(Stroke::new(1.0_f32, Color32::from_rgb(184, 72, 72)))
+                                .min_size(Vec2::new(btn_w, 32.0));
+                                if ui.add(later_btn).clicked() {
+                                    self.show_update_popup = false;
+                                }
+                            });
+                            ui.add_space(4.0);
+                        }
+                    });
+                if !open && !self.updating_app {
+                    self.show_update_popup = false;
+                }
             }
         }
     }

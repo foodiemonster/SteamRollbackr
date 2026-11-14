@@ -196,6 +196,13 @@ pub struct Texts {
     pub faq_a3: &'static str,
     pub faq_q4: &'static str,
     pub faq_a4: &'static str,
+    pub update_available_title: &'static str,
+    pub update_available_msg: &'static str,
+    pub update_now_btn: &'static str,
+    pub update_open_page_btn: &'static str,
+    pub later_btn: &'static str,
+    pub updating_app: &'static str,
+    pub sidebar_update_available: &'static str,
 }
 
 pub fn texts(lang: Language) -> Texts {
@@ -294,6 +301,13 @@ pub fn texts(lang: Language) -> Texts {
             faq_a3: "Open the Advanced tab, enter your Steam installation folder (for example ~/.local/share/Steam or your Flatpak Steam data folder) in the Steam Path field, and click Apply.",
             faq_q4: "How do I return to the latest official Steam client?",
             faq_a4: "Once slssteam-moon supports the newest Steam client (shown in the green banner on Home), click \"Unlock & Update Steam\" on the Home tab to remove the update lock and update Steam.",
+            update_available_title: "Update Available",
+            update_available_msg: "A new version of SteamRollbackr is available.",
+            update_now_btn: "Update & Restart",
+            update_open_page_btn: "Download Update",
+            later_btn: "Later",
+            updating_app: "Updating SteamRollbackr...",
+            sidebar_update_available: "Update Available",
         },
         Language::Pt => Texts {
             nav_home: "Início",
@@ -389,6 +403,13 @@ pub fn texts(lang: Language) -> Texts {
             faq_a3: "Abra a aba Avançado, digite a pasta de instalação do Steam (por exemplo ~/.local/share/Steam ou a pasta do Steam Flatpak) no campo Pasta do Steam e clique em Aplicar.",
             faq_q4: "Como volto para o cliente oficial mais recente do Steam?",
             faq_a4: "Assim que o slssteam-moon suportar o cliente Steam mais recente (indicado no banner verde em Início), clique em \"Desbloquear e Atualizar Steam\" na aba Início para remover o bloqueio e atualizar o Steam.",
+            update_available_title: "Atualização Disponível",
+            update_available_msg: "Uma nova versão do SteamRollbackr está disponível.",
+            update_now_btn: "Atualizar e Reiniciar",
+            update_open_page_btn: "Baixar Atualização",
+            later_btn: "Depois",
+            updating_app: "Atualizando SteamRollbackr...",
+            sidebar_update_available: "Atualização Disponível",
         },
         Language::Es => Texts {
             nav_home: "Inicio",
@@ -484,6 +505,13 @@ pub fn texts(lang: Language) -> Texts {
             faq_a3: "Abre la pestaña Avanzado, escribe tu carpeta de instalación de Steam (por ejemplo ~/.local/share/Steam o tu carpeta Flatpak de Steam) en Ruta de Steam y haz clic en Aplicar.",
             faq_q4: "¿Cómo vuelvo al último cliente oficial de Steam?",
             faq_a4: "Cuando slssteam-moon sea compatible con el cliente Steam más reciente (indicado en el banner verde de Inicio), haz clic en \"Desbloquear y Actualizar Steam\" en Inicio para quitar el bloqueo y actualizar Steam.",
+            update_available_title: "Actualización Disponible",
+            update_available_msg: "Hay una nueva versión de SteamRollbackr disponible.",
+            update_now_btn: "Actualizar y Reiniciar",
+            update_open_page_btn: "Descargar Actualización",
+            later_btn: "Más tarde",
+            updating_app: "Actualizando SteamRollbackr...",
+            sidebar_update_available: "Actualización Disponible",
         },
     }
 }
