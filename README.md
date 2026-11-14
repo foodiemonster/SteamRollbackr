@@ -17,7 +17,17 @@ Works on most Linux distributions (Bazzite, SteamOS, Mint, Ubuntu, Fedora, Arch)
 
 ## Installation
 
-Download the package for your system from the [Releases](https://github.com/foodiemonster/SteamRollbackr/releases) page:
+Download the package for your system from the [Releases](https://github.com/foodiemonster/SteamRollbackr/releases) page.
+
+### Recommended Format by Distro
+
+| Distribution | Recommended Format | Notes |
+| --- | --- | --- |
+| **SteamOS / Bazzite / Immutable distros** | **AppImage** or **One-Line Installer** | Works without root and survives OS updates. On SteamOS, run in **Desktop Mode**. |
+| **Ubuntu / Linux Mint / Debian / Pop!_OS** | **`.deb`** (or **AppImage**) | Double-click `.deb` to install via Software Center. |
+| **Fedora / openSUSE** | **`.rpm`** (or **AppImage**) | Double-click `.rpm` to install via Software / Discover. |
+| **Arch / EndeavourOS / CachyOS / Manjaro** | **AppImage** or **One-Line Installer** | Installs cleanly without needing `.deb`/`.rpm` tools. |
+| **Other Linux distributions** | **AppImage**, **One-Line Installer**, or **Tarball** | Self-contained or user-local (`~/.local/`). |
 
 ### AppImage (Recommended — SteamOS, Bazzite, and all distros)
 1. Download `SteamRollbackr-<version>-x86_64.AppImage`.
