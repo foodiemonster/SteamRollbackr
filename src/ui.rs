@@ -1026,153 +1026,176 @@ impl SteamRollbackrApp {
 
             row_sep(ui);
 
-            // Row 1: Local Steam Client Version
-            ui.horizontal(|ui| {
-                ui.label(RichText::new(t.steam_client).color(Color32::LIGHT_GRAY));
-                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                    if self.status.is_flatpak {
-                        pill_badge(
-                            ui,
-                            "Flatpak",
-                            Color32::from_rgb(44, 58, 86),
-                            Color32::LIGHT_BLUE,
-                        );
-                    }
-                    match &self.status.current_version {
-                        Some(v) => {
-                            ui.label(format!(
-                                "{}  ({})  [{}]",
-                                v.version_id,
-                                v.formatted_date,
-                                v.channel.suffix()
-                            ));
-                        }
-                        None => {
-                            ui.label(t.unknown_version);
-                        }
-                    }
+            let green_bg = Color32::from_rgb(35, 77, 46);
+            let green_fg = Color32::from_rgb(130, 230, 155);
+
+            // Compute consistent column widths across all System Status rows
+            let row_h = 24.0;
+            let body_font = egui::FontId::proportional(14.0);
+            let small_font = egui::FontId::proportional(12.0);
+            let col1_w = ui.fonts(|f| {
+                [t.steam_client, "slssteam-moon", "LuaTools", "Lumen"]
+                    .iter()
+                    .map(|s| f.layout_no_wrap((*s).to_string(), body_font.clone(), Color32::WHITE).size().x)
+                    .fold(0.0_f32, f32::max)
+            }) + 12.0;
+            let col2_w = 28.0;
+            let col4_w = ui.fonts(|f| {
+                [
+                    t.local_pattern_ok,
+                    t.local_pattern_missing,
+                    t.installed_pill,
+                    t.not_found_pill,
+                    "Flatpak",
+                ]
+                .iter()
+                .map(|s| f.layout_no_wrap((*s).to_string(), small_font.clone(), Color32::WHITE).size().x)
+                .fold(0.0_f32, f32::max)
+            }) + 22.0;
+            let spacing = ui.spacing().item_spacing.x;
+            let col3_w = (ui.available_width() - col1_w - col2_w - col4_w - spacing * 3.0).max(80.0);
+
+            let draw_status_row = |ui: &mut egui::Ui,
+                                   name: &str,
+                                   link: Option<(&str, &str)>,
+                                   version: &str,
+                                   badge: Option<(&str, Color32, Color32)>| {
+                ui.horizontal(|ui| {
+                    ui.allocate_ui_with_layout(
+                        Vec2::new(col1_w, row_h),
+                        egui::Layout::left_to_right(egui::Align::Center),
+                        |ui| {
+                            ui.label(RichText::new(name).color(Color32::LIGHT_GRAY));
+                        },
+                    );
+                    ui.allocate_ui_with_layout(
+                        Vec2::new(col2_w, row_h),
+                        egui::Layout::centered_and_justified(egui::Direction::LeftToRight),
+                        |ui| {
+                            if let Some((url, hover)) = link {
+                                external_link_btn(ui, url, hover);
+                            }
+                        },
+                    );
+                    ui.allocate_ui_with_layout(
+                        Vec2::new(col3_w, row_h),
+                        egui::Layout::left_to_right(egui::Align::Center),
+                        |ui| {
+                            ui.set_max_width(col3_w);
+                            ui.add(egui::Label::new(version).truncate());
+                        },
+                    );
+                    ui.allocate_ui_with_layout(
+                        Vec2::new(col4_w, row_h),
+                        egui::Layout::left_to_right(egui::Align::Center),
+                        |ui| {
+                            if let Some((text, bg, fg)) = badge {
+                                pill_badge(ui, text, bg, fg);
+                            }
+                        },
+                    );
                 });
-            });
+            };
+
+            // Row 1: Local Steam Client Version
+            let steam_ver_text = match &self.status.current_version {
+                Some(v) => format!(
+                    "{}  ({})  [{}]",
+                    v.version_id,
+                    v.formatted_date,
+                    v.channel.suffix()
+                ),
+                None => t.unknown_version.to_string(),
+            };
+            let steam_badge = if self.status.is_flatpak {
+                Some(("Flatpak", Color32::from_rgb(44, 58, 86), Color32::LIGHT_BLUE))
+            } else {
+                None
+            };
+            draw_status_row(ui, t.steam_client, None, &steam_ver_text, steam_badge);
 
             row_sep(ui);
 
-            // Row 2: slsteam-moon
-            ui.horizontal(|ui| {
-                ui.label(RichText::new("slsteam-moon").color(Color32::LIGHT_GRAY));
-                external_link_btn(
-                    ui,
-                    "https://github.com/swwayps/slsteam-moon",
-                    t.open_repo_hover,
-                );
-                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                    if let Some(Ok(st)) = &self.moon_status {
-                        if let Some(supported) = st.local_pattern_supported {
-                            if supported {
-                                pill_badge(
-                                    ui,
-                                    t.local_pattern_ok,
-                                    Color32::from_rgb(35, 77, 46),
-                                    Color32::from_rgb(130, 230, 155),
-                                );
-                            } else {
-                                pill_badge(
-                                    ui,
-                                    t.local_pattern_missing,
-                                    Color32::from_rgb(82, 36, 36),
-                                    Color32::from_rgb(245, 150, 150),
-                                );
-                            }
-                        }
+            // Row 2: slssteam-moon
+            let moon_ver = self
+                .status
+                .lumen_versions
+                .slsteam_moon
+                .as_deref()
+                .unwrap_or("—");
+            let moon_badge = if let Some(Ok(st)) = &self.moon_status {
+                match st.local_pattern_supported {
+                    Some(true) => Some((t.local_pattern_ok, green_bg, green_fg)),
+                    Some(false) => Some((
+                        t.local_pattern_missing,
+                        Color32::from_rgb(82, 36, 36),
+                        Color32::from_rgb(245, 150, 150),
+                    )),
+                    None if self.status.lumen_versions.slssteam_installed => {
+                        Some((t.installed_pill, green_bg, green_fg))
                     }
-                    let moon_ver = self
-                        .status
-                        .lumen_versions
-                        .slsteam_moon
-                        .as_deref()
-                        .unwrap_or_else(|| {
-                            if self.status.lumen_versions.slssteam_installed {
-                                t.installed_pill
-                            } else {
-                                t.not_found_pill
-                            }
-                        });
-                    ui.label(moon_ver);
-                });
-            });
+                    None => Some((t.not_found_pill, Color32::from_rgb(54, 54, 58), Color32::GRAY)),
+                }
+            } else if self.status.lumen_versions.slssteam_installed {
+                Some((t.installed_pill, green_bg, green_fg))
+            } else {
+                Some((t.not_found_pill, Color32::from_rgb(54, 54, 58), Color32::GRAY))
+            };
+            draw_status_row(
+                ui,
+                "slssteam-moon",
+                Some(("https://github.com/swwayps/slsteam-moon", t.open_repo_hover)),
+                moon_ver,
+                moon_badge,
+            );
 
             row_sep(ui);
 
             // Row 3: LuaTools
-            ui.horizontal(|ui| {
-                ui.label(RichText::new("LuaTools").color(Color32::LIGHT_GRAY));
-                external_link_btn(
-                    ui,
-                    "https://github.com/swwayps/luatools-moon",
-                    t.open_repo_hover,
-                );
-                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                    if let Some(tag) = &self.status.lumen_versions.luatools {
-                        pill_badge(
-                            ui,
-                            t.installed_pill,
-                            Color32::from_rgb(59, 47, 92),
-                            Color32::from_rgb(198, 178, 250),
-                        );
-                        ui.label(tag);
-                    } else if self.status.lumen_versions.luatools_installed {
-                        pill_badge(
-                            ui,
-                            t.installed_pill,
-                            Color32::from_rgb(59, 47, 92),
-                            Color32::from_rgb(198, 178, 250),
-                        );
-                    } else {
-                        pill_badge(
-                            ui,
-                            t.not_found_pill,
-                            Color32::from_rgb(54, 54, 58),
-                            Color32::GRAY,
-                        );
-                    }
-                });
-            });
+            let luatools_ver = self
+                .status
+                .lumen_versions
+                .luatools
+                .as_deref()
+                .unwrap_or("—");
+            let luatools_badge = if self.status.lumen_versions.luatools.is_some()
+                || self.status.lumen_versions.luatools_installed
+            {
+                Some((t.installed_pill, green_bg, green_fg))
+            } else {
+                Some((t.not_found_pill, Color32::from_rgb(54, 54, 58), Color32::GRAY))
+            };
+            draw_status_row(
+                ui,
+                "LuaTools",
+                Some(("https://github.com/swwayps/luatools-moon", t.open_repo_hover)),
+                luatools_ver,
+                luatools_badge,
+            );
 
             row_sep(ui);
 
             // Row 4: Lumen
-            ui.horizontal(|ui| {
-                ui.label(RichText::new("Lumen").color(Color32::LIGHT_GRAY));
-                external_link_btn(
-                    ui,
-                    "https://github.com/swwayps/luatools-moon",
-                    t.open_repo_hover,
-                );
-                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                    if let Some(tag) = &self.status.lumen_versions.lumen {
-                        pill_badge(
-                            ui,
-                            t.installed_pill,
-                            Color32::from_rgb(59, 47, 92),
-                            Color32::from_rgb(198, 178, 250),
-                        );
-                        ui.label(tag);
-                    } else if self.status.lumen_versions.lumen_installed {
-                        pill_badge(
-                            ui,
-                            t.installed_pill,
-                            Color32::from_rgb(59, 47, 92),
-                            Color32::from_rgb(198, 178, 250),
-                        );
-                    } else {
-                        pill_badge(
-                            ui,
-                            t.not_found_pill,
-                            Color32::from_rgb(54, 54, 58),
-                            Color32::GRAY,
-                        );
-                    }
-                });
-            });
+            let lumen_ver = self
+                .status
+                .lumen_versions
+                .lumen
+                .as_deref()
+                .unwrap_or("—");
+            let lumen_badge = if self.status.lumen_versions.lumen.is_some()
+                || self.status.lumen_versions.lumen_installed
+            {
+                Some((t.installed_pill, green_bg, green_fg))
+            } else {
+                Some((t.not_found_pill, Color32::from_rgb(54, 54, 58), Color32::GRAY))
+            };
+            draw_status_row(
+                ui,
+                "Lumen",
+                Some(("https://github.com/swwayps/luatools-moon", t.open_repo_hover)),
+                lumen_ver,
+                lumen_badge,
+            );
         });
     }
 
