@@ -837,6 +837,16 @@ pub fn rollback_to_manifest(
     }
 
     lock_only(steam_dir, log)?;
+
+    if !steam_dir.join("ubuntu12_32/libcrypto.so.3").is_file() {
+        log("32-bit libcrypto.so.3 not found in ubuntu12_32/; attempting automatic install...");
+        if let Err(e) = install_libcrypto3(steam_dir, log) {
+            log(&format!(
+                "Warning: Could not auto-install 32-bit libcrypto.so.3 ({e}). Rollback still succeeded; you can install it later from Tools."
+            ));
+        }
+    }
+
     Ok(())
 }
 

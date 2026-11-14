@@ -1538,6 +1538,32 @@ impl SteamRollbackrApp {
                 lumen_badge,
             );
         });
+
+        ui.add_space(10.0);
+        let muted = Color32::from_rgb(135, 138, 145);
+        ui.vertical_centered(|ui| {
+            ui.label(
+                RichText::new(format!("v{CURRENT_VERSION}"))
+                    .size(11.5)
+                    .color(muted),
+            );
+            ui.horizontal(|ui| {
+                let approx_w = 138.0;
+                let pad = ((ui.available_width() - approx_w) * 0.5).max(0.0);
+                ui.add_space(pad);
+                ui.hyperlink_to(
+                    RichText::new("GitHub")
+                        .size(11.5)
+                        .color(Color32::from_rgb(145, 175, 220)),
+                    "https://github.com/foodiemonster/SteamRollbackr",
+                );
+                ui.label(
+                    RichText::new("•  by foodiemonster")
+                        .size(11.5)
+                        .color(muted),
+                );
+            });
+        });
     }
 
     fn render_advanced(&mut self, ui: &mut egui::Ui, t: &Texts) {
