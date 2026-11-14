@@ -84,6 +84,40 @@ fn apply_fluent_fonts(ctx: &egui::Context) {
             break;
         }
     }
+
+    let bold_candidates = [
+        "/usr/share/fonts/google-noto/NotoSans-Bold.ttf",
+        "/usr/share/fonts/noto/NotoSans-Bold.ttf",
+        "/usr/share/fonts/abattis-cantarell-fonts/Cantarell-Bold.otf",
+        "/usr/share/fonts/cantarell/Cantarell-Bold.otf",
+        "/usr/share/fonts/liberation-sans/LiberationSans-Bold.ttf",
+        "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf",
+    ];
+    let mut bold_loaded = false;
+    for path in bold_candidates {
+        if let Ok(bytes) = std::fs::read(path) {
+            fonts
+                .font_data
+                .insert("fluent_bold".to_owned(), egui::FontData::from_owned(bytes));
+            fonts.families.insert(
+                egui::FontFamily::Name("fluent_bold".into()),
+                vec!["fluent_bold".to_owned()],
+            );
+            bold_loaded = true;
+            break;
+        }
+    }
+    if !bold_loaded {
+        let fallback = fonts
+            .families
+            .get(&egui::FontFamily::Proportional)
+            .cloned()
+            .unwrap_or_default();
+        fonts
+            .families
+            .insert(egui::FontFamily::Name("fluent_bold".into()), fallback);
+    }
+
     ctx.set_fonts(fonts);
 }
 
@@ -712,48 +746,94 @@ impl SteamRollbackrApp {
     fn render_home(&mut self, ui: &mut egui::Ui, t: &Texts) {
         let has_steam = self.status.steam_dir.is_some();
 
-        // 1. Compatibility Banner at top
-        let (banner_bg, banner_border, banner_fg, banner_text) = if self.checking_moon {
-            (
-                Color32::from_rgb(38, 44, 56),
-                Color32::from_rgb(66, 80, 108),
-                Color32::LIGHT_GRAY,
-                t.banner_checking,
-            )
+        // 1. Compatibility Banner at top (with bold keywords)
+        let mut job = egui::text::LayoutJob::default();
+        let (banner_bg, banner_border) = if self.checking_moon {
+            let fmt = egui::TextFormat {
+                font_id: egui::FontId::proportional(13.5),
+                color: Color32::LIGHT_GRAY,
+                ..Default::default()
+            };
+            job.append(t.banner_checking, 0.0, fmt);
+            (Color32::from_rgb(38, 44, 56), Color32::from_rgb(66, 80, 108))
         } else {
             match &self.moon_status {
                 Some(Ok(st)) => match st.updated_for_latest_steam {
-                    Some(true) => (
-                        Color32::from_rgb(28, 56, 38),
-                        Color32::from_rgb(56, 128, 78),
-                        Color32::from_rgb(140, 235, 165),
-                        t.banner_compatible,
-                    ),
-                    Some(false) => (
-                        Color32::from_rgb(58, 46, 24),
-                        Color32::from_rgb(138, 104, 42),
-                        Color32::from_rgb(250, 212, 120),
-                        t.banner_incompatible,
-                    ),
-                    None => (
-                        Color32::from_rgb(43, 43, 46),
-                        Color32::from_rgb(58, 58, 61),
-                        Color32::LIGHT_GRAY,
-                        t.banner_checking,
-                    ),
+                    Some(true) => {
+                        let reg = egui::TextFormat {
+                            font_id: egui::FontId::proportional(13.5),
+                            color: Color32::from_rgb(150, 235, 175),
+                            ..Default::default()
+                        };
+                        let bold = egui::TextFormat {
+                            font_id: egui::FontId::new(
+                                13.5,
+                                egui::FontFamily::Name("fluent_bold".into()),
+                            ),
+                            color: Color32::from_rgb(205, 255, 220),
+                            ..Default::default()
+                        };
+                        let ver = st
+                            .latest_moon_version
+                            .as_deref()
+                            .map(|v| format!("slsteam-moon {v}"))
+                            .unwrap_or_else(|| "slsteam-moon".to_string());
+                        job.append(t.banner_compat_p1, 0.0, reg.clone());
+                        job.append(&ver, 0.0, bold.clone());
+                        job.append(t.banner_compat_p2, 0.0, reg.clone());
+                        job.append(t.banner_compat_btn, 0.0, bold);
+                        job.append(t.banner_compat_p3, 0.0, reg);
+                        (Color32::from_rgb(28, 56, 38), Color32::from_rgb(56, 128, 78))
+                    }
+                    Some(false) => {
+                        let reg = egui::TextFormat {
+                            font_id: egui::FontId::proportional(13.5),
+                            color: Color32::from_rgb(245, 210, 130),
+                            ..Default::default()
+                        };
+                        let bold = egui::TextFormat {
+                            font_id: egui::FontId::new(
+                                13.5,
+                                egui::FontFamily::Name("fluent_bold".into()),
+                            ),
+                            color: Color32::from_rgb(255, 238, 185),
+                            ..Default::default()
+                        };
+                        job.append(t.banner_incompat_p1, 0.0, reg.clone());
+                        job.append("slsteam-moon", 0.0, bold.clone());
+                        job.append(t.banner_incompat_p2, 0.0, reg.clone());
+                        job.append(t.banner_incompat_btn, 0.0, bold);
+                        job.append(t.banner_incompat_p3, 0.0, reg);
+                        (Color32::from_rgb(58, 46, 24), Color32::from_rgb(138, 104, 42))
+                    }
+                    None => {
+                        let fmt = egui::TextFormat {
+                            font_id: egui::FontId::proportional(13.5),
+                            color: Color32::LIGHT_GRAY,
+                            ..Default::default()
+                        };
+                        job.append(t.banner_checking, 0.0, fmt);
+                        (Color32::from_rgb(43, 43, 46), Color32::from_rgb(58, 58, 61))
+                    }
                 },
-                Some(Err(_)) => (
-                    Color32::from_rgb(58, 32, 32),
-                    Color32::from_rgb(128, 58, 58),
-                    Color32::from_rgb(245, 160, 160),
-                    t.check_failed,
-                ),
-                None => (
-                    Color32::from_rgb(43, 43, 46),
-                    Color32::from_rgb(58, 58, 61),
-                    Color32::LIGHT_GRAY,
-                    t.banner_checking,
-                ),
+                Some(Err(_)) => {
+                    let fmt = egui::TextFormat {
+                        font_id: egui::FontId::proportional(13.5),
+                        color: Color32::from_rgb(245, 160, 160),
+                        ..Default::default()
+                    };
+                    job.append(t.check_failed, 0.0, fmt);
+                    (Color32::from_rgb(58, 32, 32), Color32::from_rgb(128, 58, 58))
+                }
+                None => {
+                    let fmt = egui::TextFormat {
+                        font_id: egui::FontId::proportional(13.5),
+                        color: Color32::LIGHT_GRAY,
+                        ..Default::default()
+                    };
+                    job.append(t.banner_checking, 0.0, fmt);
+                    (Color32::from_rgb(43, 43, 46), Color32::from_rgb(58, 58, 61))
+                }
             }
         };
 
@@ -768,9 +848,7 @@ impl SteamRollbackrApp {
                     if self.checking_moon {
                         ui.spinner();
                     }
-                    ui.add(
-                        egui::Label::new(RichText::new(banner_text).color(banner_fg).strong()).wrap(),
-                    );
+                    ui.add(egui::Label::new(job).wrap());
                 });
             });
 

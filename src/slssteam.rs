@@ -13,6 +13,7 @@ pub struct SlsMoonStatus {
     pub monitor_timestamp_utc: i64,
     pub monitor_display: String,
     pub moon_display: String,
+    pub latest_moon_version: Option<String>,
     pub latest_steam_display: Option<String>,
     pub updated_for_latest_steam: Option<bool>,
     pub local_pattern_supported: Option<bool>,
@@ -80,6 +81,33 @@ fn check_pattern_exists(sha256: &str) -> bool {
         .unwrap_or(false)
 }
 
+fn fetch_latest_moon_release_version() -> Option<String> {
+    let cache_key = "slsteam_moon_releases_atom.xml";
+    let url = "https://github.com/swwayps/slsteam-moon/releases.atom";
+    let ttl = Duration::from_secs(600);
+    let xml = if let Some(cached) = read_cache(cache_key, ttl) {
+        cached
+    } else {
+        match ureq::get(url)
+            .set("User-Agent", "SteamRollbackr/0.4")
+            .call()
+            .and_then(|r| r.into_string().map_err(ureq::Error::from))
+        {
+            Ok(body) => {
+                write_cache(cache_key, &body);
+                body
+            }
+            Err(_) => read_stale_cache(cache_key)?,
+        }
+    };
+
+    parse_atom_entries(&xml)
+        .into_iter()
+        .next()
+        .map(|(_, _, title)| title)
+        .filter(|t| !t.is_empty())
+}
+
 pub fn check_slsteam_moon(steam_dir: Option<&Path>) -> Result<SlsMoonStatus, String> {
     let monitor_date = fetch_latest_atom_date(
         "steam_monitor_atom.xml",
@@ -89,6 +117,7 @@ pub fn check_slsteam_moon(steam_dir: Option<&Path>) -> Result<SlsMoonStatus, Str
         "slsteam_moon_atom.xml",
         "https://github.com/swwayps/slsteam-moon/commits/HEAD.atom",
     )?;
+    let latest_moon_version = fetch_latest_moon_release_version();
     let latest_steam_date = fetch_latest_atom_date(
         "releases_steamrt64_atom.xml",
         "https://github.com/SteamTracking/SteamTracking/commits/HEAD/ClientManifest/steam_client_steamrt64.atom",
@@ -119,6 +148,7 @@ pub fn check_slsteam_moon(steam_dir: Option<&Path>) -> Result<SlsMoonStatus, Str
         monitor_timestamp_utc: monitor_date.timestamp(),
         monitor_display: format_dt(monitor_date),
         moon_display: format_dt(moon_date),
+        latest_moon_version,
         latest_steam_display: latest_steam_date.map(format_dt),
         updated_for_latest_steam,
         local_pattern_supported,
