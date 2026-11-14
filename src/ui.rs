@@ -44,6 +44,7 @@ pub struct SteamRollbackrApp {
     releases: Vec<ReleaseEntry>,
     selected_idx: Option<usize>,
     details_entry: Option<ReleaseEntry>,
+    confirm_restart: bool,
     current_page: u32,
     has_more: bool,
     loading_releases: bool,
@@ -418,6 +419,7 @@ impl SteamRollbackrApp {
             releases: Vec::new(),
             selected_idx: None,
             details_entry: None,
+            confirm_restart: false,
             current_page: 1,
             has_more: true,
             loading_releases: false,
@@ -808,7 +810,7 @@ impl SteamRollbackrApp {
                     )
                     .clicked()
                     {
-                        self.start_restart_steam();
+                        self.confirm_restart = true;
                     }
 
                     let min_spin = 0.75_f32;
@@ -1787,6 +1789,41 @@ impl eframe::App for SteamRollbackrApp {
                 });
             if !open {
                 self.details_entry = None;
+            }
+        }
+
+        if self.confirm_restart {
+            let mut open = true;
+            egui::Window::new(t.restart_confirm_title)
+                .open(&mut open)
+                .collapsible(false)
+                .resizable(false)
+                .anchor(egui::Align2::CENTER_CENTER, Vec2::ZERO)
+                .show(ctx, |ui| {
+                    ui.add_space(4.0);
+                    ui.label(RichText::new(t.restart_confirm_msg).color(Color32::WHITE));
+                    ui.add_space(12.0);
+                    ui.horizontal(|ui| {
+                        let yes_btn = egui::Button::new(RichText::new(t.yes_btn).color(Color32::WHITE))
+                            .fill(Color32::from_rgb(42, 88, 142))
+                            .stroke(Stroke::new(1.0_f32, Color32::from_rgb(76, 136, 206)))
+                            .min_size(Vec2::new(84.0, 30.0));
+                        if ui.add(yes_btn).clicked() {
+                            self.confirm_restart = false;
+                            self.start_restart_steam();
+                        }
+
+                        let no_btn = egui::Button::new(t.no_btn)
+                            .fill(Color32::from_rgb(44, 45, 50))
+                            .stroke(Stroke::new(1.0_f32, Color32::from_rgb(68, 70, 76)))
+                            .min_size(Vec2::new(84.0, 30.0));
+                        if ui.add(no_btn).clicked() {
+                            self.confirm_restart = false;
+                        }
+                    });
+                });
+            if !open {
+                self.confirm_restart = false;
             }
         }
     }

@@ -168,6 +168,10 @@ pub struct Texts {
     pub commit_sha_label: &'static str,
     pub commit_msg_label: &'static str,
     pub view_on_github: &'static str,
+    pub restart_confirm_title: &'static str,
+    pub restart_confirm_msg: &'static str,
+    pub yes_btn: &'static str,
+    pub no_btn: &'static str,
 }
 
 pub fn texts(lang: Language) -> Texts {
@@ -238,6 +242,10 @@ pub fn texts(lang: Language) -> Texts {
             commit_sha_label: "Commit SHA:",
             commit_msg_label: "Commit Message:",
             view_on_github: "View commit on GitHub",
+            restart_confirm_title: "Restart Steam",
+            restart_confirm_msg: "Are you sure you want to Restart Steam?",
+            yes_btn: "YES",
+            no_btn: "NO",
         },
         Language::Pt => Texts {
             nav_home: "Início",
@@ -305,6 +313,10 @@ pub fn texts(lang: Language) -> Texts {
             commit_sha_label: "SHA do Commit:",
             commit_msg_label: "Mensagem do Commit:",
             view_on_github: "Ver commit no GitHub",
+            restart_confirm_title: "Reiniciar Steam",
+            restart_confirm_msg: "Tem certeza de que deseja reiniciar o Steam?",
+            yes_btn: "SIM",
+            no_btn: "NÃO",
         },
         Language::Es => Texts {
             nav_home: "Inicio",
@@ -372,6 +384,10 @@ pub fn texts(lang: Language) -> Texts {
             commit_sha_label: "SHA del Commit:",
             commit_msg_label: "Mensaje del Commit:",
             view_on_github: "Ver commit en GitHub",
+            restart_confirm_title: "Reiniciar Steam",
+            restart_confirm_msg: "¿Estás seguro de que quieres reiniciar Steam?",
+            yes_btn: "SÍ",
+            no_btn: "NO",
         },
     }
 }
