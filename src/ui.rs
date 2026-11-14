@@ -207,27 +207,33 @@ fn draw_sidebar_icon(
             }
         }
         SidebarIcon::Refresh => {
-            // Open circling arrow (~275 deg arc + arrowhead), rotated by spin_angle
+            // Chrome-style circular refresh arrow, rotated by spin_angle
             let r = 5.2_f32;
-            let base = -std::f32::consts::FRAC_PI_4 + spin_angle;
-            let sweep = std::f32::consts::PI * 1.52;
-            let start = base - sweep;
-            let steps = 20;
+            let start = 0.28_f32;
+            let end = std::f32::consts::TAU - 0.62_f32;
+            let (sin_s, cos_s) = spin_angle.sin_cos();
+            let rot = |px: f32, py: f32| -> egui::Pos2 {
+                egui::pos2(x + px * cos_s - py * sin_s, y + px * sin_s + py * cos_s)
+            };
+
+            let steps = 22;
             let pts: Vec<egui::Pos2> = (0..=steps)
                 .map(|i| {
-                    let a = start + sweep * (i as f32 / steps as f32);
-                    egui::pos2(x + r * a.cos(), y + r * a.sin())
+                    let a = start + (end - start) * (i as f32 / steps as f32);
+                    rot(r * a.cos(), r * a.sin())
                 })
                 .collect();
-            painter.add(egui::Shape::line(pts, s));
+            let refresh_stroke = Stroke::new(1.6_f32, color);
+            painter.add(egui::Shape::line(pts, refresh_stroke));
 
-            let tip = egui::pos2(x + r * base.cos(), y + r * base.sin());
-            let tangent = Vec2::new(-base.sin(), base.cos());
-            let radial = Vec2::new(base.cos(), base.sin());
-            let wing1 = tip - tangent * 3.4 + radial * 2.5;
-            let wing2 = tip - tangent * 3.4 - radial * 2.5;
-            painter.line_segment([tip, wing1], s);
-            painter.line_segment([tip, wing2], s);
+            // Crisp 90-degree L-shaped arrowhead at the top-right end of the arc
+            let tx = r * end.cos();
+            let ty = r * end.sin();
+            let tip = rot(tx, ty);
+            let up = rot(tx, ty - 3.6);
+            let left = rot(tx - 3.6, ty);
+            painter.line_segment([tip, up], refresh_stroke);
+            painter.line_segment([tip, left], refresh_stroke);
         }
         SidebarIcon::Restart => {
             // Power / restart symbol
