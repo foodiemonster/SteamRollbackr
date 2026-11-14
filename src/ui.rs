@@ -210,38 +210,56 @@ fn draw_sidebar_icon(
             }
         }
         SidebarIcon::Refresh => {
-            // Chrome-style circular refresh arrow, rotated by spin_angle
+            // Two circling arrows (like "Check for update"), rotated by spin_angle
             let r = 5.2_f32;
-            let start = 0.28_f32;
-            let end = std::f32::consts::TAU - 0.62_f32;
             let (sin_s, cos_s) = spin_angle.sin_cos();
             let rot = |px: f32, py: f32| -> egui::Pos2 {
                 egui::pos2(x + px * cos_s - py * sin_s, y + px * sin_s + py * cos_s)
             };
+            let arrow_stroke = Stroke::new(1.5_f32, color);
 
+            // Draw two opposite ~135-degree arcs with arrowheads
+            for base_offset in [0.0_f32, std::f32::consts::PI] {
+                let start = base_offset - 2.35;
+                let end = base_offset - 0.15;
+                let steps = 12;
+                let pts: Vec<egui::Pos2> = (0..=steps)
+                    .map(|i| {
+                        let a = start + (end - start) * (i as f32 / steps as f32);
+                        rot(r * a.cos(), r * a.sin())
+                    })
+                    .collect();
+                painter.add(egui::Shape::line(pts, arrow_stroke));
+
+                let tip = rot(r * end.cos(), r * end.sin());
+                let tangent = Vec2::new(-end.sin(), end.cos());
+                let radial = Vec2::new(end.cos(), end.sin());
+                let wing1_local = Vec2::new(r * end.cos(), r * end.sin()) - tangent * 2.8 + radial * 2.2;
+                let wing2_local = Vec2::new(r * end.cos(), r * end.sin()) - tangent * 2.8 - radial * 2.2;
+                painter.line_segment([tip, rot(wing1_local.x, wing1_local.y)], arrow_stroke);
+                painter.line_segment([tip, rot(wing2_local.x, wing2_local.y)], arrow_stroke);
+            }
+        }
+        SidebarIcon::Restart => {
+            // Single round circling arrow (like "Restart Steam")
+            let r = 5.2_f32;
+            let start = 0.28_f32;
+            let end = std::f32::consts::TAU - 0.62_f32;
             let steps = 22;
             let pts: Vec<egui::Pos2> = (0..=steps)
                 .map(|i| {
                     let a = start + (end - start) * (i as f32 / steps as f32);
-                    rot(r * a.cos(), r * a.sin())
+                    egui::pos2(x + r * a.cos(), y + r * a.sin())
                 })
                 .collect();
-            let refresh_stroke = Stroke::new(1.6_f32, color);
-            painter.add(egui::Shape::line(pts, refresh_stroke));
+            let restart_stroke = Stroke::new(1.5_f32, color);
+            painter.add(egui::Shape::line(pts, restart_stroke));
 
-            // Crisp 90-degree L-shaped arrowhead at the top-right end of the arc
-            let tx = r * end.cos();
-            let ty = r * end.sin();
-            let tip = rot(tx, ty);
-            let up = rot(tx, ty - 3.6);
-            let left = rot(tx - 3.6, ty);
-            painter.line_segment([tip, up], refresh_stroke);
-            painter.line_segment([tip, left], refresh_stroke);
-        }
-        SidebarIcon::Restart => {
-            // Power / restart symbol
-            painter.circle_stroke(egui::pos2(x, y + 0.5), 5.0, s);
-            painter.line_segment([egui::pos2(x, y - 6.0), egui::pos2(x, y - 1.0)], s);
+            let tx = x + r * end.cos();
+            let ty = y + r * end.sin();
+            let tip = egui::pos2(tx, ty);
+            painter.line_segment([tip, egui::pos2(tx, ty - 3.5)], restart_stroke);
+            painter.line_segment([tip, egui::pos2(tx - 3.5, ty)], restart_stroke);
         }
     }
 }
@@ -1451,8 +1469,8 @@ impl SteamRollbackrApp {
 
         ui.add_space(12.0);
 
-        // 2. Available Releases Card
-        let list_height = (ui.available_height() - 120.0).max(150.0);
+        // 2. Available Releases Card (5 rows high)
+        let list_height = 175.0;
         card_frame().show(ui, |ui| {
             ui.set_width(ui.available_width());
             ui.horizontal(|ui| {
