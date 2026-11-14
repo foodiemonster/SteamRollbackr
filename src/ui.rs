@@ -1803,24 +1803,34 @@ impl eframe::App for SteamRollbackrApp {
                     ui.add_space(4.0);
                     ui.label(RichText::new(t.restart_confirm_msg).color(Color32::WHITE));
                     ui.add_space(12.0);
+                    let avail_w = ui.available_width();
+                    let side_margin = 6.0;
+                    let gap = 8.0;
+                    let btn_w = ((avail_w - side_margin * 2.0 - gap) * 0.5).max(90.0);
                     ui.horizontal(|ui| {
-                        let yes_btn = egui::Button::new(RichText::new(t.yes_btn).color(Color32::WHITE))
-                            .fill(Color32::from_rgb(42, 88, 142))
-                            .stroke(Stroke::new(1.0_f32, Color32::from_rgb(76, 136, 206)))
-                            .min_size(Vec2::new(84.0, 30.0));
+                        ui.add_space(side_margin);
+                        let yes_btn =
+                            egui::Button::new(RichText::new(t.yes_btn).color(Color32::WHITE))
+                                .fill(Color32::from_rgb(38, 92, 66))
+                                .stroke(Stroke::new(1.0_f32, Color32::from_rgb(66, 146, 106)))
+                                .min_size(Vec2::new(btn_w, 32.0));
                         if ui.add(yes_btn).clicked() {
                             self.confirm_restart = false;
                             self.start_restart_steam();
                         }
 
-                        let no_btn = egui::Button::new(t.no_btn)
-                            .fill(Color32::from_rgb(44, 45, 50))
-                            .stroke(Stroke::new(1.0_f32, Color32::from_rgb(68, 70, 76)))
-                            .min_size(Vec2::new(84.0, 30.0));
+                        ui.add_space(gap);
+
+                        let no_btn =
+                            egui::Button::new(RichText::new(t.no_btn).color(Color32::WHITE))
+                                .fill(Color32::from_rgb(122, 40, 40))
+                                .stroke(Stroke::new(1.0_f32, Color32::from_rgb(184, 72, 72)))
+                                .min_size(Vec2::new(btn_w, 32.0));
                         if ui.add(no_btn).clicked() {
                             self.confirm_restart = false;
                         }
                     });
+                    ui.add_space(4.0);
                 });
             if !open {
                 self.confirm_restart = false;
