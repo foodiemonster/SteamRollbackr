@@ -1,6 +1,6 @@
 [package]
 name = "steam-rollbackr"
-version = "0.5.2"
+version = "0.5.3"
 edition = "2021"
 description = "Cross-distro Linux GUI utility to roll back the Steam client and lock/unlock updates"
 license = "MIT"
