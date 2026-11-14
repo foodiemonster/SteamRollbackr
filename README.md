@@ -8,11 +8,12 @@ Works on most Linux distributions (Bazzite, SteamOS, Mint, Ubuntu, Fedora, Arch)
 
 ## What It Does
 
-- Detects your Steam installation and shows the currently installed client version.
-- Shows whether automatic updates are currently locked or unlocked.
-- Lists previous Steam client releases (newest first) from [SteamTracking](https://github.com/SteamTracking/SteamTracking).
-- Rolls back Steam to the selected release and locks updates using `Steam.cfg` / `steam.cfg` and read-only permissions on `package/`.
-- Unlocks updates when you want Steam to update normally again.
+- Checks `slssteam-moon` compatibility against the latest Steam client and displays a live status banner on **Home**.
+- Shows your **System Status** (Local Steam Client Version, `slssteam-moon` pattern status, LuaTools, and Lumen) with direct project links.
+- One-click **Rollback & Lock Steam** to roll back to the newest compatible Steam release and lock updates, or **Unlock & Update Steam** when `slssteam-moon` supports the latest client.
+- **Advanced** tab for manual channel (`steamrt64` / `ubuntu12`) and release selection from [SteamTracking](https://github.com/SteamTracking/SteamTracking), manual lock/unlock controls, and custom **Steam Path** override.
+- **Tools** tab to install or remove 32-bit `libcrypto.so.3` (`ubuntu12_32/`), LuaTools (`swwayps/luatools-moon`), and LuaTools (`mrpinkguy/luatools-linux`).
+- **Troubleshooting** FAQ and **Logs** viewer, plus **Restart Steam** and **Refresh Status** sidebar actions (available in English, Portuguese, and Spanish).
 
 ## Installation
 
@@ -36,10 +37,11 @@ cargo build --release
 ## Usage
 
 1. Open **SteamRollbackr** from your application menu (or run `~/.local/bin/steamrollbackr`).
-2. **Recommended:** Click the **Magic Button** to automatically pick the newest Steam release compatible with `slsteam-moon`, roll back to it, and lock updates.
-3. **Manual option:** If you prefer a specific version, select a channel (`steamrt64` for modern 64-bit Linux, or `ubuntu12` for legacy pre-November 2026 builds), pick a release from the list, and click **Rollback & Lock Updates**.
-4. To allow Steam to update again later, click **Unlock Updates**.
-5. To lock your current version without rolling back, click **Lock Current Version**.
+2. **Home (Recommended):**
+   - Click **Rollback & Lock Steam** to automatically pick the newest Steam release compatible with `slssteam-moon`, roll back to it, and lock updates.
+   - When the banner indicates the latest Steam version is compatible with `slssteam-moon`, click **Unlock & Update Steam** to remove the lock and update Steam.
+3. **Advanced:** Override the detected Steam Path if needed, select a channel (`steamrt64` for modern 64-bit Linux, or `ubuntu12` for legacy pre-November 2026 builds), pick a specific release, and use **Rollback & Lock Updates**, **Unlock Only**, or **Lock Current Version**.
+4. **Tools & Troubleshooting:** Install or remove helper fixes (`libcrypto.so.3`, LuaTools) and check the FAQ if anything needs attention.
 
 ## Uninstall
 
