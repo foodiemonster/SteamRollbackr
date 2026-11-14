@@ -1098,7 +1098,7 @@ impl SteamRollbackrApp {
                 ui.allocate_new_ui(
                     egui::UiBuilder::new()
                         .max_rect(rect3)
-                        .layout(egui::Layout::left_to_right(egui::Align::Center)),
+                        .layout(egui::Layout::right_to_left(egui::Align::Center)),
                     |ui| {
                         ui.add(egui::Label::new(version).truncate());
                     },
@@ -1116,7 +1116,7 @@ impl SteamRollbackrApp {
                 );
             };
 
-            // Row 1: Local Steam Client Version
+            // Row 1: Local Steam Client Version (label + full untruncated version on the right)
             let steam_ver_text = match &self.status.current_version {
                 Some(v) => format!(
                     "{}  ({})  [{}]",
@@ -1126,12 +1126,21 @@ impl SteamRollbackrApp {
                 ),
                 None => t.unknown_version.to_string(),
             };
-            let steam_badge = if self.status.is_flatpak {
-                Some(("Flatpak", Color32::from_rgb(44, 58, 86), Color32::LIGHT_BLUE))
-            } else {
-                None
-            };
-            draw_status_row(ui, t.steam_client, None, &steam_ver_text, steam_badge);
+            ui.horizontal(|ui| {
+                ui.set_min_height(row_h);
+                ui.label(RichText::new(t.steam_client).color(Color32::LIGHT_GRAY));
+                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                    if self.status.is_flatpak {
+                        pill_badge(
+                            ui,
+                            "Flatpak",
+                            Color32::from_rgb(44, 58, 86),
+                            Color32::LIGHT_BLUE,
+                        );
+                    }
+                    ui.label(steam_ver_text);
+                });
+            });
 
             row_sep(ui);
 
