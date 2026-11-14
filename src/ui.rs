@@ -1633,7 +1633,7 @@ impl SteamRollbackrApp {
                     } else {
                         Color32::from_rgb(130, 134, 140)
                     };
-                    let btn = egui::Button::new(RichText::new(label).color(fg))
+                    let btn = egui::Button::new("")
                         .fill(if enabled {
                             fill
                         } else {
@@ -1648,7 +1648,23 @@ impl SteamRollbackrApp {
                             },
                         ))
                         .min_size(Vec2::new(ui.available_width(), 38.0));
-                    ui.add_enabled(enabled, btn)
+                    let resp = ui.add_enabled(enabled, btn);
+                    let galley = ui.fonts(|f| {
+                        f.layout_no_wrap(
+                            label.to_string(),
+                            egui::FontId::proportional(14.0),
+                            fg,
+                        )
+                    });
+                    ui.painter().galley(
+                        egui::pos2(
+                            resp.rect.center().x - galley.size().x * 0.5,
+                            resp.rect.center().y - galley.size().y * 0.5,
+                        ),
+                        galley,
+                        fg,
+                    );
+                    resp
                 };
 
                 if fluent_btn(
