@@ -416,22 +416,62 @@ fn find_i386_libcrypto(dir: &Path) -> Option<PathBuf> {
     None
 }
 
-/// Copies 32-bit libcrypto.so.3 from SteamLinuxRuntime in steamapps/common into ubuntu12_32/ and sets +x.
+/// Parses library folder paths from Steam's `libraryfolders.vdf`.
+fn parse_library_folders(content: &str) -> Vec<PathBuf> {
+    let mut dirs = Vec::new();
+    for line in content.lines() {
+        let mut tokens = line.split('"');
+        let _before = tokens.next();
+        let Some(key) = tokens.next() else { continue };
+        let _between = tokens.next();
+        let Some(val) = tokens.next() else { continue };
+        if key == "path" && !val.trim().is_empty() {
+            let p = PathBuf::from(val.trim());
+            if !dirs.contains(&p) {
+                dirs.push(p);
+            }
+        }
+    }
+    dirs
+}
+
+/// Collects `<library>/steamapps/common` directories from the primary Steam dir and `libraryfolders.vdf`.
+fn collect_steam_common_dirs(steam_dir: &Path) -> Vec<PathBuf> {
+    let mut common_dirs = vec![steam_dir.join("steamapps/common")];
+    for vdf_rel in ["steamapps/libraryfolders.vdf", "config/libraryfolders.vdf"] {
+        let vdf_path = steam_dir.join(vdf_rel);
+        if let Ok(content) = fs::read_to_string(&vdf_path) {
+            for lib in parse_library_folders(&content) {
+                let common = lib.join("steamapps/common");
+                if !common_dirs.contains(&common) {
+                    common_dirs.push(common);
+                }
+            }
+        }
+    }
+    common_dirs
+}
+
+/// Copies 32-bit libcrypto.so.3 from SteamLinuxRuntime across any Steam library folder into ubuntu12_32/ and sets +x.
 pub fn install_libcrypto3(steam_dir: &Path, log: &mut dyn FnMut(&str)) -> Result<(), String> {
-    let common_dir = steam_dir.join("steamapps/common");
-    if !common_dir.is_dir() {
-        return Err(format!(
-            "steamapps/common not found at {}",
+    let common_dirs = collect_steam_common_dirs(steam_dir);
+    let mut found = None;
+    for common_dir in &common_dirs {
+        if !common_dir.is_dir() {
+            continue;
+        }
+        log(&format!(
+            "Searching {} for i386-linux-gnu/libcrypto.so.3...",
             common_dir.display()
         ));
+        if let Some(src) = find_i386_libcrypto(common_dir) {
+            found = Some(src);
+            break;
+        }
     }
 
-    log(&format!(
-        "Searching {} for i386-linux-gnu/libcrypto.so.3...",
-        common_dir.display()
-    ));
-    let src = find_i386_libcrypto(&common_dir).ok_or_else(|| {
-        "Could not find i386-linux-gnu/libcrypto.so.3 in steamapps/common. Make sure Steam Linux Runtime is installed.".to_string()
+    let src = found.ok_or_else(|| {
+        "Could not find i386-linux-gnu/libcrypto.so.3 in any Steam library folder. Open Steam and install \"Steam Linux Runtime\" (or any Proton game) first, then try again.".to_string()
     })?;
     log(&format!("Found: {}", src.display()));
 
@@ -594,6 +634,33 @@ mod tests {
 
         set_package_writable(&tmp, true).unwrap();
         let _ = fs::remove_dir_all(&tmp);
+    }
+
+    #[test]
+    fn test_parse_library_folders() {
+        let vdf = r#"
+"libraryfolders"
+{
+	"0"
+	{
+		"path"		"/home/user/.local/share/Steam"
+		"label"		""
+	}
+	"1"
+	{
+		"path"		"/run/media/mmcblk0p1/SteamLibrary"
+		"label"		"SDCard"
+	}
+}
+"#;
+        let libs = parse_library_folders(vdf);
+        assert_eq!(
+            libs,
+            vec![
+                PathBuf::from("/home/user/.local/share/Steam"),
+                PathBuf::from("/run/media/mmcblk0p1/SteamLibrary"),
+            ]
+        );
     }
 }
 
