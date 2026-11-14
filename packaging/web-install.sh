@@ -22,3 +22,4 @@ curl -fsSL "$TARBALL_URL" -o "$TMP_DIR/steamrollbackr.tar.gz"
 echo "Extracting and installing..."
 tar -xzf "$TMP_DIR/steamrollbackr.tar.gz" -C "$TMP_DIR"
 bash "$TMP_DIR/install.sh"
+
