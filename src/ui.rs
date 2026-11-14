@@ -1800,14 +1800,18 @@ impl eframe::App for SteamRollbackrApp {
                 .resizable(false)
                 .anchor(egui::Align2::CENTER_CENTER, Vec2::ZERO)
                 .show(ctx, |ui| {
+                    let popup_w = 310.0;
+                    ui.set_width(popup_w);
                     ui.add_space(4.0);
-                    ui.label(RichText::new(t.restart_confirm_msg).color(Color32::WHITE));
+                    ui.vertical_centered(|ui| {
+                        ui.label(RichText::new(t.restart_confirm_msg).color(Color32::WHITE));
+                    });
                     ui.add_space(12.0);
-                    let avail_w = ui.available_width();
                     let side_margin = 6.0;
                     let gap = 8.0;
-                    let btn_w = ((avail_w - side_margin * 2.0 - gap) * 0.5).max(90.0);
+                    let btn_w = (popup_w - side_margin * 2.0 - gap) * 0.5;
                     ui.horizontal(|ui| {
+                        ui.spacing_mut().item_spacing.x = 0.0;
                         ui.add_space(side_margin);
                         let yes_btn =
                             egui::Button::new(RichText::new(t.yes_btn).color(Color32::WHITE))
