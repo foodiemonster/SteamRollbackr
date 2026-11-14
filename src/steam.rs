@@ -202,7 +202,15 @@ pub fn check_lock_state(steam_dir: &Path) -> LockState {
 }
 
 pub fn inspect_steam() -> SteamStatus {
-    let steam_dir = find_steam_dir();
+    inspect_steam_with_override(None)
+}
+
+pub fn inspect_steam_with_override(override_dir: Option<&Path>) -> SteamStatus {
+    let steam_dir = match override_dir {
+        Some(p) if p.is_dir() => Some(p.to_path_buf()),
+        Some(_) => None,
+        None => find_steam_dir(),
+    };
     let lumen_versions = read_lumen_versions();
     match steam_dir {
         Some(dir) => {

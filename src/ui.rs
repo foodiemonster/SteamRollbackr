@@ -6,9 +6,10 @@ use crate::history::{fetch_manifest_content, fetch_releases, ReleaseEntry};
 use crate::i18n::{draw_flag, texts, Language, Texts};
 use crate::slssteam::{check_slsteam_moon, find_best_compatible_release, SlsMoonStatus};
 use crate::steam::{
-    inspect_steam, lock_only, restart_steam, rollback_to_manifest, unlock_and_update_steam,
-    unlock_updates, LockState, ManifestChannel, SteamStatus,
+    inspect_steam, inspect_steam_with_override, lock_only, restart_steam, rollback_to_manifest,
+    unlock_and_update_steam, unlock_updates, LockState, ManifestChannel, SteamStatus,
 };
+use std::path::PathBuf;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum ActiveTab {
@@ -37,6 +38,8 @@ pub struct SteamRollbackrApp {
     lang: Language,
     active_tab: ActiveTab,
     status: SteamStatus,
+    steam_path_override: Option<PathBuf>,
+    steam_path_input: String,
     channel: ManifestChannel,
     releases: Vec<ReleaseEntry>,
     selected_idx: Option<usize>,
@@ -372,6 +375,11 @@ impl SteamRollbackrApp {
 
         let (tx, rx) = mpsc::channel();
         let status = inspect_steam();
+        let steam_path_input = status
+            .steam_dir
+            .as_ref()
+            .map(|p| p.display().to_string())
+            .unwrap_or_default();
         let default_channel = status
             .current_version
             .as_ref()
@@ -385,6 +393,8 @@ impl SteamRollbackrApp {
             lang,
             active_tab: ActiveTab::Home,
             status,
+            steam_path_override: None,
+            steam_path_input,
             channel: default_channel,
             releases: Vec::new(),
             selected_idx: None,
@@ -414,7 +424,15 @@ impl SteamRollbackrApp {
     }
 
     fn refresh_status(&mut self) {
-        self.status = inspect_steam();
+        self.status = inspect_steam_with_override(self.steam_path_override.as_deref());
+        if self.steam_path_override.is_none() {
+            self.steam_path_input = self
+                .status
+                .steam_dir
+                .as_ref()
+                .map(|p| p.display().to_string())
+                .unwrap_or_default();
+        }
     }
 
     fn check_moon(&mut self) {
@@ -1290,30 +1308,131 @@ impl SteamRollbackrApp {
                 .color(Color32::WHITE),
         );
         ui.label(RichText::new(t.advanced_subtitle).color(Color32::LIGHT_GRAY));
-        ui.add_space(10.0);
+        ui.add_space(12.0);
 
+        // 1. Steam Path & Channel Card
         card_frame().show(ui, |ui| {
             ui.set_width(ui.available_width());
+
+            // Steam Path Override Row
             ui.horizontal(|ui| {
-                ui.label(RichText::new(format!("{}:", t.steam_path)).strong());
-                match &self.status.steam_dir {
-                    Some(dir) => {
-                        ui.monospace(dir.display().to_string());
-                    }
-                    None => {
-                        ui.label(RichText::new(t.steam_not_found).color(Color32::LIGHT_RED));
-                    }
+                ui.label(RichText::new(t.steam_path).strong().color(Color32::WHITE));
+                if self.status.steam_dir.is_none() {
+                    pill_badge(
+                        ui,
+                        t.steam_not_found,
+                        Color32::from_rgb(82, 36, 36),
+                        Color32::from_rgb(245, 150, 150),
+                    );
+                } else if self.steam_path_override.is_some() {
+                    pill_badge(
+                        ui,
+                        t.custom_pill,
+                        Color32::from_rgb(44, 58, 86),
+                        Color32::LIGHT_BLUE,
+                    );
+                } else {
+                    pill_badge(
+                        ui,
+                        t.auto_pill,
+                        Color32::from_rgb(35, 77, 46),
+                        Color32::from_rgb(130, 230, 155),
+                    );
                 }
             });
             ui.add_space(6.0);
             ui.horizontal(|ui| {
-                ui.label(RichText::new(t.channel).strong());
+                let reset_w = 96.0;
+                let apply_w = 76.0;
+                let input_w = (ui.available_width() - reset_w - apply_w - 16.0).max(140.0);
+                let path_edit = egui::TextEdit::singleline(&mut self.steam_path_input)
+                    .hint_text("/path/to/Steam")
+                    .font(egui::TextStyle::Monospace)
+                    .desired_width(input_w);
+                let resp = ui.add_sized([input_w, 28.0], path_edit);
+
+                let trimmed = self.steam_path_input.trim();
+                let can_apply = !self.busy && !trimmed.is_empty();
+                let apply_btn = egui::Button::new(RichText::new(t.apply_btn).color(if can_apply {
+                    Color32::WHITE
+                } else {
+                    Color32::from_rgb(130, 134, 140)
+                }))
+                .fill(if can_apply {
+                    Color32::from_rgb(42, 88, 142)
+                } else {
+                    Color32::from_rgb(48, 50, 56)
+                })
+                .stroke(Stroke::new(
+                    1.0_f32,
+                    if can_apply {
+                        Color32::from_rgb(76, 136, 206)
+                    } else {
+                        Color32::from_rgb(64, 66, 72)
+                    },
+                ))
+                .min_size(Vec2::new(apply_w, 28.0));
+
+                let enter_pressed = resp.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter));
+                if (ui.add_enabled(can_apply, apply_btn).clicked() || (enter_pressed && can_apply))
+                {
+                    self.steam_path_override = Some(PathBuf::from(trimmed));
+                    self.refresh_status();
+                    self.check_moon();
+                }
+
+                let can_reset = !self.busy && self.steam_path_override.is_some();
+                let reset_btn = egui::Button::new(t.reset_auto_btn)
+                    .fill(Color32::from_rgb(44, 45, 50))
+                    .stroke(Stroke::new(1.0_f32, Color32::from_rgb(68, 70, 76)))
+                    .min_size(Vec2::new(reset_w, 28.0));
+                if ui.add_enabled(can_reset, reset_btn).clicked() {
+                    self.steam_path_override = None;
+                    self.refresh_status();
+                    self.check_moon();
+                }
+            });
+
+            ui.add_space(8.0);
+            let sep_rect = ui.available_rect_before_wrap();
+            ui.painter().hline(
+                sep_rect.left()..=sep_rect.right(),
+                sep_rect.top(),
+                Stroke::new(1.0_f32, Color32::from_rgb(53, 53, 57)),
+            );
+            ui.add_space(10.0);
+
+            // Channel Selector Row
+            ui.horizontal(|ui| {
+                ui.label(RichText::new(t.channel).strong().color(Color32::WHITE));
+                ui.add_space(6.0);
                 let mut changed = false;
                 for (ch, label) in [
                     (ManifestChannel::SteamRt64, t.channel_steamrt64),
                     (ManifestChannel::Ubuntu12, t.channel_ubuntu12),
                 ] {
-                    if ui.selectable_value(&mut self.channel, ch, label).changed() {
+                    let active = self.channel == ch;
+                    let btn = egui::Button::new(RichText::new(label).color(if active {
+                        Color32::WHITE
+                    } else {
+                        Color32::LIGHT_GRAY
+                    }))
+                    .fill(if active {
+                        Color32::from_rgb(42, 88, 142)
+                    } else {
+                        Color32::from_rgb(44, 45, 50)
+                    })
+                    .stroke(Stroke::new(
+                        1.0_f32,
+                        if active {
+                            Color32::from_rgb(76, 136, 206)
+                        } else {
+                            Color32::from_rgb(64, 66, 72)
+                        },
+                    ))
+                    .min_size(Vec2::new(0.0, 28.0));
+                    if ui.add(btn).clicked() && !active {
+                        self.channel = ch;
                         changed = true;
                     }
                 }
@@ -1322,34 +1441,53 @@ impl SteamRollbackrApp {
                 }
             });
 
+            ui.add_space(4.0);
             let rec_msg = match self.status.current_version.as_ref().map(|v| v.channel) {
                 Some(ManifestChannel::Ubuntu12) => t.tip_ubuntu12_active,
                 _ => t.tip_steamrt64_rec,
             };
             ui.label(RichText::new(rec_msg).small().color(Color32::LIGHT_GRAY));
-            ui.add_space(6.0);
-
-            ui.horizontal(|ui| {
-                ui.label(t.filter);
-                ui.add(egui::TextEdit::singleline(&mut self.filter_text).hint_text(t.filter_hint));
-                if ui.button(t.reload_list).clicked() && !self.loading_releases {
-                    self.load_releases(1, true);
-                }
-            });
         });
 
-        ui.add_space(10.0);
-        ui.label(RichText::new(t.available_releases).strong());
-        ui.add_space(4.0);
+        ui.add_space(12.0);
 
-        let list_height = (ui.available_height() - 56.0).max(160.0);
+        // 2. Available Releases Card
+        let list_height = (ui.available_height() - 120.0).max(150.0);
         card_frame().show(ui, |ui| {
+            ui.set_width(ui.available_width());
+            ui.horizontal(|ui| {
+                ui.label(
+                    RichText::new(t.available_releases)
+                        .size(15.0)
+                        .strong()
+                        .color(Color32::WHITE),
+                );
+                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                    let reload_btn = egui::Button::new(t.reload_list)
+                        .fill(Color32::from_rgb(44, 45, 50))
+                        .stroke(Stroke::new(1.0_f32, Color32::from_rgb(68, 70, 76)))
+                        .min_size(Vec2::new(0.0, 26.0));
+                    if ui
+                        .add_enabled(!self.loading_releases, reload_btn)
+                        .clicked()
+                    {
+                        self.load_releases(1, true);
+                    }
+                    ui.add_sized(
+                        [180.0, 26.0],
+                        egui::TextEdit::singleline(&mut self.filter_text)
+                            .hint_text(t.filter_hint),
+                    );
+                });
+            });
+
+            ui.add_space(8.0);
             egui::ScrollArea::vertical()
                 .id_salt("release_list_scroll")
                 .max_height(list_height)
                 .auto_shrink([false, false])
                 .show(ui, |ui| {
-                    ui.spacing_mut().item_spacing.y = 4.0;
+                    ui.spacing_mut().item_spacing.y = 5.0;
                     let query = self.filter_text.to_lowercase();
 
                     for (i, entry) in self.releases.iter().enumerate() {
@@ -1381,9 +1519,27 @@ impl SteamRollbackrApp {
                         ui.horizontal(|ui| {
                             let info_w = 56.0;
                             let btn_w = (ui.available_width() - info_w - 8.0).max(120.0);
-                            let row_btn = egui::Button::new(short_title)
-                                .selected(selected)
-                                .min_size(Vec2::new(btn_w, 28.0));
+                            let row_btn = egui::Button::new(
+                                RichText::new(short_title).color(if selected {
+                                    Color32::WHITE
+                                } else {
+                                    Color32::LIGHT_GRAY
+                                }),
+                            )
+                            .fill(if selected {
+                                Color32::from_rgb(42, 88, 142)
+                            } else {
+                                Color32::from_rgb(38, 39, 43)
+                            })
+                            .stroke(Stroke::new(
+                                1.0_f32,
+                                if selected {
+                                    Color32::from_rgb(76, 136, 206)
+                                } else {
+                                    Color32::from_rgb(54, 55, 60)
+                                },
+                            ))
+                            .min_size(Vec2::new(btn_w, 30.0));
                             if ui
                                 .add(row_btn)
                                 .on_hover_text(&hover_details)
@@ -1393,8 +1549,10 @@ impl SteamRollbackrApp {
                                 self.selected_idx = Some(i);
                             }
 
-                            let info_btn =
-                                egui::Button::new(t.info_btn).min_size(Vec2::new(info_w, 28.0));
+                            let info_btn = egui::Button::new(t.info_btn)
+                                .fill(Color32::from_rgb(44, 45, 50))
+                                .stroke(Stroke::new(1.0_f32, Color32::from_rgb(64, 66, 72)))
+                                .min_size(Vec2::new(info_w, 30.0));
                             if ui.add(info_btn).on_hover_text(t.info_hover).clicked() {
                                 self.details_entry = Some(entry.clone());
                             }
@@ -1408,7 +1566,11 @@ impl SteamRollbackrApp {
                             ui.label(t.loading_releases);
                         });
                     } else if self.has_more {
-                        if ui.button(t.load_older).clicked() {
+                        let more_btn = egui::Button::new(t.load_older)
+                            .fill(Color32::from_rgb(44, 45, 50))
+                            .stroke(Stroke::new(1.0_f32, Color32::from_rgb(68, 70, 76)))
+                            .min_size(Vec2::new(ui.available_width(), 28.0));
+                        if ui.add(more_btn).clicked() {
                             let next_page = self.current_page + 1;
                             self.load_releases(next_page, false);
                         }
@@ -1416,35 +1578,92 @@ impl SteamRollbackrApp {
                 });
         });
 
-        ui.add_space(10.0);
+        ui.add_space(12.0);
 
-        ui.horizontal(|ui| {
+        // 3. Manual Action Buttons Card
+        card_frame().show(ui, |ui| {
+            ui.set_width(ui.available_width());
             let has_steam = self.status.steam_dir.is_some();
             let can_rollback = has_steam && self.selected_idx.is_some() && !self.busy;
             let can_unlock = has_steam && !self.busy && self.status.lock_state.is_locked();
             let can_lock = has_steam && !self.busy;
 
-            if ui
-                .add_enabled(can_rollback, egui::Button::new(t.rollback_and_lock))
+            ui.columns(3, |cols| {
+                let fluent_btn = |ui: &mut egui::Ui,
+                                  label: &str,
+                                  enabled: bool,
+                                  fill: Color32,
+                                  stroke: Color32|
+                 -> egui::Response {
+                    let fg = if enabled {
+                        Color32::WHITE
+                    } else {
+                        Color32::from_rgb(130, 134, 140)
+                    };
+                    let btn = egui::Button::new(RichText::new(label).color(fg))
+                        .fill(if enabled {
+                            fill
+                        } else {
+                            Color32::from_rgb(48, 50, 56)
+                        })
+                        .stroke(Stroke::new(
+                            1.0_f32,
+                            if enabled {
+                                stroke
+                            } else {
+                                Color32::from_rgb(64, 66, 72)
+                            },
+                        ))
+                        .min_size(Vec2::new(ui.available_width(), 38.0));
+                    ui.add_enabled(enabled, btn)
+                };
+
+                if fluent_btn(
+                    &mut cols[0],
+                    t.rollback_and_lock,
+                    can_rollback,
+                    Color32::from_rgb(42, 88, 142),
+                    Color32::from_rgb(76, 136, 206),
+                )
                 .clicked()
-            {
-                self.start_rollback();
-            }
-            if ui
-                .add_enabled(can_unlock, egui::Button::new(t.unlock_updates))
+                {
+                    self.start_rollback();
+                }
+
+                if fluent_btn(
+                    &mut cols[1],
+                    t.unlock_updates,
+                    can_unlock,
+                    Color32::from_rgb(38, 92, 66),
+                    Color32::from_rgb(66, 146, 106),
+                )
                 .clicked()
-            {
-                self.start_unlock();
-            }
-            if ui
-                .add_enabled(can_lock, egui::Button::new(t.lock_current))
+                {
+                    self.start_unlock();
+                }
+
+                if fluent_btn(
+                    &mut cols[2],
+                    t.lock_current,
+                    can_lock,
+                    Color32::from_rgb(58, 62, 72),
+                    Color32::from_rgb(92, 98, 112),
+                )
                 .clicked()
-            {
-                self.start_lock_only();
-            }
+                {
+                    self.start_lock_only();
+                }
+            });
+
             if self.busy {
-                ui.spinner();
-                ui.label(t.working);
+                ui.add_space(10.0);
+                ui.horizontal(|ui| {
+                    ui.spinner();
+                    ui.label(RichText::new(t.working).strong());
+                    if let Some(last) = self.logs.last() {
+                        ui.label(RichText::new(format!("— {last}")).color(Color32::LIGHT_GRAY));
+                    }
+                });
             }
         });
     }
