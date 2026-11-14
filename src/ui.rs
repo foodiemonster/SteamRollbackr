@@ -806,12 +806,16 @@ impl SteamRollbackrApp {
                         ui.add_space(12.0);
                         let popup_id = ui.make_persistent_id("lang_dropdown_popup");
                         let (rect, resp) =
-                            ui.allocate_exact_size(Vec2::new(24.0, 16.0), egui::Sense::click());
+                            ui.allocate_exact_size(Vec2::new(18.0, 12.0), egui::Sense::click());
                         draw_flag(ui.painter(), rect, self.lang);
                         let label_resp = ui.add(
-                            egui::Button::new(RichText::new(self.lang.name()).small())
-                                .fill(Color32::TRANSPARENT)
-                                .stroke(Stroke::NONE),
+                            egui::Button::new(
+                                RichText::new(self.lang.name())
+                                    .size(14.0)
+                                    .color(Color32::LIGHT_GRAY),
+                            )
+                            .fill(Color32::TRANSPARENT)
+                            .stroke(Stroke::NONE),
                         );
                         if resp.clicked() || label_resp.clicked() {
                             ui.memory_mut(|mem| mem.toggle_popup(popup_id));
@@ -830,11 +834,14 @@ impl SteamRollbackrApp {
                                     }
                                     ui.horizontal(|ui| {
                                         let (r, flag_resp) = ui.allocate_exact_size(
-                                            Vec2::new(22.0, 14.0),
+                                            Vec2::new(18.0, 12.0),
                                             egui::Sense::click(),
                                         );
                                         draw_flag(ui.painter(), r, lang_opt);
-                                        let btn_resp = ui.selectable_label(false, lang_opt.name());
+                                        let btn_resp = ui.selectable_label(
+                                            false,
+                                            RichText::new(lang_opt.name()).size(14.0),
+                                        );
                                         if flag_resp.clicked() || btn_resp.clicked() {
                                             self.set_language(lang_opt);
                                         }
@@ -844,7 +851,7 @@ impl SteamRollbackrApp {
                         );
                     });
 
-                    ui.add_space(6.0);
+                    ui.separator();
                     let has_steam = self.status.steam_dir.is_some();
                     if sidebar_item(
                         ui,
@@ -1892,8 +1899,10 @@ impl SteamRollbackrApp {
                         ui.set_width(ui.available_width());
                         egui::CollapsingHeader::new(
                             RichText::new(*q)
-                                .size(14.5)
-                                .strong()
+                                .font(egui::FontId::new(
+                                    14.5,
+                                    egui::FontFamily::Name("fluent_bold".into()),
+                                ))
                                 .color(Color32::WHITE),
                         )
                         .id_salt(("faq_item", idx))
