@@ -395,6 +395,66 @@ pub fn restart_steam(steam_dir: &Path, log: &mut dyn FnMut(&str)) -> Result<(), 
     Ok(())
 }
 
+fn find_i386_libcrypto(dir: &Path) -> Option<PathBuf> {
+    let entries = fs::read_dir(dir).ok()?;
+    for entry in entries.flatten() {
+        let path = entry.path();
+        if path.is_dir() {
+            if let Some(found) = find_i386_libcrypto(&path) {
+                return Some(found);
+            }
+        } else if path.file_name().and_then(|n| n.to_str()) == Some("libcrypto.so.3")
+            && path
+                .parent()
+                .and_then(|p| p.file_name())
+                .and_then(|n| n.to_str())
+                == Some("i386-linux-gnu")
+        {
+            return Some(path);
+        }
+    }
+    None
+}
+
+/// Copies 32-bit libcrypto.so.3 from SteamLinuxRuntime in steamapps/common into ubuntu12_32/ and sets +x.
+pub fn install_libcrypto3(steam_dir: &Path, log: &mut dyn FnMut(&str)) -> Result<(), String> {
+    let common_dir = steam_dir.join("steamapps/common");
+    if !common_dir.is_dir() {
+        return Err(format!(
+            "steamapps/common not found at {}",
+            common_dir.display()
+        ));
+    }
+
+    log(&format!(
+        "Searching {} for i386-linux-gnu/libcrypto.so.3...",
+        common_dir.display()
+    ));
+    let src = find_i386_libcrypto(&common_dir).ok_or_else(|| {
+        "Could not find i386-linux-gnu/libcrypto.so.3 in steamapps/common. Make sure Steam Linux Runtime is installed.".to_string()
+    })?;
+    log(&format!("Found: {}", src.display()));
+
+    let dest_dir = steam_dir.join("ubuntu12_32");
+    fs::create_dir_all(&dest_dir)
+        .map_err(|e| format!("Failed to create {}: {e}", dest_dir.display()))?;
+    let dest = dest_dir.join("libcrypto.so.3");
+
+    fs::copy(&src, &dest)
+        .map_err(|e| format!("Failed to copy to {}: {e}", dest.display()))?;
+    log(&format!("Copied to {}", dest.display()));
+
+    let mut perms = fs::metadata(&dest)
+        .map_err(|e| format!("Failed to read permissions on {}: {e}", dest.display()))?
+        .permissions();
+    perms.set_mode(perms.mode() | 0o111);
+    fs::set_permissions(&dest, perms)
+        .map_err(|e| format!("Failed to chmod +x {}: {e}", dest.display()))?;
+
+    log("SUCCESS! 32-bit libcrypto.so.3 installed and marked executable.");
+    Ok(())
+}
+
 /// Rolls back Steam to a specific manifest (served via local HTTP server) and locks updates.
 pub fn rollback_to_manifest(
     steam_dir: &Path,

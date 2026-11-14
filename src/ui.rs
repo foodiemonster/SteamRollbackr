@@ -6,8 +6,9 @@ use crate::history::{fetch_manifest_content, fetch_releases, ReleaseEntry};
 use crate::i18n::{draw_flag, texts, Language, Texts};
 use crate::slssteam::{check_slsteam_moon, find_best_compatible_release, SlsMoonStatus};
 use crate::steam::{
-    inspect_steam, inspect_steam_with_override, lock_only, restart_steam, rollback_to_manifest,
-    unlock_and_update_steam, unlock_updates, LockState, ManifestChannel, SteamStatus,
+    inspect_steam, inspect_steam_with_override, install_libcrypto3, lock_only, restart_steam,
+    rollback_to_manifest, unlock_and_update_steam, unlock_updates, LockState, ManifestChannel,
+    SteamStatus,
 };
 use std::path::PathBuf;
 
@@ -15,6 +16,8 @@ use std::path::PathBuf;
 enum ActiveTab {
     Home,
     Advanced,
+    Tools,
+    Troubleshooting,
     Logs,
 }
 
@@ -63,6 +66,8 @@ pub struct SteamRollbackrApp {
 enum SidebarIcon {
     Home,
     Advanced,
+    Tools,
+    Troubleshooting,
     Logs,
     Refresh,
     Restart,
@@ -196,6 +201,23 @@ fn draw_sidebar_icon(
                 );
                 painter.circle_filled(egui::pos2(x + kx, y + dy), 1.8, color);
             }
+        }
+        SidebarIcon::Tools => {
+            // Diagonal wrench / tool silhouette
+            painter.line_segment([egui::pos2(x - 4.5, y + 4.5), egui::pos2(x + 2.0, y - 2.0)], Stroke::new(1.8_f32, color));
+            painter.circle_stroke(egui::pos2(x + 3.2, y - 3.2), 2.5, s);
+            painter.line_segment([egui::pos2(x + 3.0, y - 3.0), egui::pos2(x + 5.2, y - 5.2)], Stroke::new(1.6_f32, Color32::from_rgb(32, 32, 34)));
+        }
+        SidebarIcon::Troubleshooting => {
+            // Circle with question mark
+            painter.circle_stroke(center, 6.0, s);
+            painter.text(
+                egui::pos2(x, y + 0.5),
+                egui::Align2::CENTER_CENTER,
+                "?",
+                egui::FontId::proportional(10.5),
+                color,
+            );
         }
         SidebarIcon::Logs => {
             // Document / log lines
@@ -586,6 +608,23 @@ impl SteamRollbackrApp {
         });
     }
 
+    fn start_install_libcrypto3(&mut self) {
+        let Some(steam_dir) = self.status.steam_dir.clone() else {
+            return;
+        };
+        self.busy = true;
+        self.initial_ready_only = false;
+        self.logs.clear();
+        self.logs.push("Installing 32-bit libcrypto.so.3...".to_string());
+        let tx = self.tx.clone();
+        thread::spawn(move || {
+            let res = install_libcrypto3(&steam_dir, &mut |msg| {
+                let _ = tx.send(BgEvent::Log(msg.to_string()));
+            });
+            let _ = tx.send(BgEvent::ActionFinished(res));
+        });
+    }
+
     fn start_restart_steam(&mut self) {
         let Some(steam_dir) = self.status.steam_dir.clone() else {
             return;
@@ -745,6 +784,12 @@ impl SteamRollbackrApp {
                 for (tab, icon, label) in [
                     (ActiveTab::Home, SidebarIcon::Home, t.nav_home),
                     (ActiveTab::Advanced, SidebarIcon::Advanced, t.nav_advanced),
+                    (ActiveTab::Tools, SidebarIcon::Tools, t.nav_tools),
+                    (
+                        ActiveTab::Troubleshooting,
+                        SidebarIcon::Troubleshooting,
+                        t.nav_troubleshooting,
+                    ),
                     (ActiveTab::Logs, SidebarIcon::Logs, t.nav_logs),
                 ] {
                     if sidebar_item(ui, icon, label, self.active_tab == tab, true).clicked() {
@@ -1407,7 +1452,7 @@ impl SteamRollbackrApp {
                 .min_size(Vec2::new(apply_w, 28.0));
 
                 let enter_pressed = resp.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter));
-                if (ui.add_enabled(can_apply, apply_btn).clicked() || (enter_pressed && can_apply))
+                if ui.add_enabled(can_apply, apply_btn).clicked() || (enter_pressed && can_apply)
                 {
                     self.steam_path_override = Some(PathBuf::from(trimmed));
                     self.refresh_status();
@@ -1717,6 +1762,155 @@ impl SteamRollbackrApp {
         });
     }
 
+    fn render_tools(&mut self, ui: &mut egui::Ui, t: &Texts) {
+        ui.label(
+            RichText::new(t.tools_title)
+                .size(20.0)
+                .strong()
+                .color(Color32::WHITE),
+        );
+        ui.label(RichText::new(t.tools_subtitle).color(Color32::LIGHT_GRAY));
+        ui.add_space(12.0);
+
+        let has_steam = self.status.steam_dir.is_some();
+        let libcrypto_installed = self
+            .status
+            .steam_dir
+            .as_ref()
+            .is_some_and(|d| d.join("ubuntu12_32/libcrypto.so.3").is_file());
+
+        card_frame().show(ui, |ui| {
+            ui.set_width(ui.available_width());
+            ui.horizontal(|ui| {
+                ui.label(
+                    RichText::new(t.libcrypto_title)
+                        .size(15.5)
+                        .strong()
+                        .color(Color32::WHITE),
+                );
+                ui.add_space(6.0);
+                if libcrypto_installed {
+                    pill_badge(
+                        ui,
+                        t.installed_pill,
+                        Color32::from_rgb(35, 77, 46),
+                        Color32::from_rgb(130, 230, 155),
+                    );
+                } else {
+                    pill_badge(
+                        ui,
+                        t.missing_pill,
+                        Color32::from_rgb(82, 36, 36),
+                        Color32::from_rgb(245, 150, 150),
+                    );
+                }
+            });
+
+            ui.add_space(6.0);
+            ui.add(
+                egui::Label::new(RichText::new(t.libcrypto_desc).color(Color32::LIGHT_GRAY))
+                    .wrap(),
+            );
+            ui.add_space(10.0);
+
+            let can_run = has_steam && !self.busy;
+            let fg = if can_run {
+                Color32::WHITE
+            } else {
+                Color32::from_rgb(130, 134, 140)
+            };
+            let btn = egui::Button::new("")
+                .fill(if can_run {
+                    Color32::from_rgb(42, 88, 142)
+                } else {
+                    Color32::from_rgb(48, 50, 56)
+                })
+                .stroke(Stroke::new(
+                    1.0_f32,
+                    if can_run {
+                        Color32::from_rgb(76, 136, 206)
+                    } else {
+                        Color32::from_rgb(64, 66, 72)
+                    },
+                ))
+                .min_size(Vec2::new(240.0, 36.0));
+            let resp = ui.add_enabled(can_run, btn);
+            let galley = ui.fonts(|f| {
+                f.layout_no_wrap(
+                    t.libcrypto_btn.to_string(),
+                    egui::FontId::proportional(14.0),
+                    fg,
+                )
+            });
+            ui.painter().galley(
+                egui::pos2(
+                    resp.rect.center().x - galley.size().x * 0.5,
+                    resp.rect.center().y - galley.size().y * 0.5,
+                ),
+                galley,
+                fg,
+            );
+            if resp.clicked() {
+                self.start_install_libcrypto3();
+            }
+
+            if self.busy {
+                ui.add_space(10.0);
+                ui.horizontal(|ui| {
+                    ui.spinner();
+                    ui.label(RichText::new(t.working).strong());
+                    if let Some(last) = self.logs.last() {
+                        ui.label(RichText::new(format!("— {last}")).color(Color32::LIGHT_GRAY));
+                    }
+                });
+            }
+        });
+    }
+
+    fn render_troubleshooting(&self, ui: &mut egui::Ui, t: &Texts) {
+        ui.label(
+            RichText::new(t.troubleshooting_title)
+                .size(20.0)
+                .strong()
+                .color(Color32::WHITE),
+        );
+        ui.label(RichText::new(t.troubleshooting_subtitle).color(Color32::LIGHT_GRAY));
+        ui.add_space(12.0);
+
+        egui::ScrollArea::vertical()
+            .id_salt("troubleshooting_scroll")
+            .auto_shrink([false, false])
+            .show(ui, |ui| {
+                let faqs = [
+                    (t.faq_q1, t.faq_a1),
+                    (t.faq_q2, t.faq_a2),
+                    (t.faq_q3, t.faq_a3),
+                    (t.faq_q4, t.faq_a4),
+                ];
+                for (idx, (q, a)) in faqs.iter().enumerate() {
+                    card_frame().show(ui, |ui| {
+                        ui.set_width(ui.available_width());
+                        egui::CollapsingHeader::new(
+                            RichText::new(*q)
+                                .size(14.5)
+                                .strong()
+                                .color(Color32::WHITE),
+                        )
+                        .id_salt(("faq_item", idx))
+                        .default_open(idx == 0)
+                        .show(ui, |ui| {
+                            ui.add_space(4.0);
+                            ui.add(
+                                egui::Label::new(RichText::new(*a).color(Color32::LIGHT_GRAY))
+                                    .wrap(),
+                            );
+                        });
+                    });
+                    ui.add_space(8.0);
+                }
+            });
+    }
+
     fn render_logs(&mut self, ctx: &egui::Context, ui: &mut egui::Ui, t: &Texts) {
         ui.horizontal(|ui| {
             ui.label(
@@ -1771,6 +1965,8 @@ impl eframe::App for SteamRollbackrApp {
             .show(ctx, |ui| match self.active_tab {
                 ActiveTab::Home => self.render_home(ui, &t),
                 ActiveTab::Advanced => self.render_advanced(ui, &t),
+                ActiveTab::Tools => self.render_tools(ui, &t),
+                ActiveTab::Troubleshooting => self.render_troubleshooting(ui, &t),
                 ActiveTab::Logs => self.render_logs(ctx, ui, &t),
             });
 
