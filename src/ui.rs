@@ -1107,7 +1107,7 @@ impl SteamRollbackrApp {
                 ui.allocate_new_ui(
                     egui::UiBuilder::new()
                         .max_rect(rect4)
-                        .layout(egui::Layout::left_to_right(egui::Align::Center)),
+                        .layout(egui::Layout::right_to_left(egui::Align::Center)),
                     |ui| {
                         if let Some((text, bg, fg)) = badge {
                             pill_badge(ui, text, bg, fg);
