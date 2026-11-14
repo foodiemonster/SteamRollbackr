@@ -104,6 +104,7 @@ fn read_lumen_versions() -> LumenVersions {
 pub struct DistroInfo {
     pub id: String,
     pub name: String,
+    pub is_arch_based: bool,
     pub in_steamos_gaming_mode: bool,
 }
 
@@ -117,21 +118,27 @@ pub struct SteamStatus {
     pub lumen_versions: LumenVersions,
 }
 
-pub fn parse_os_release(content: &str) -> (String, String) {
+pub fn parse_os_release(content: &str) -> (String, String, bool) {
     let mut id = String::new();
+    let mut id_like = String::new();
     let mut pretty = String::new();
     let mut name = String::new();
 
     for line in content.lines() {
         let line = line.trim();
         if let Some(val) = line.strip_prefix("ID=") {
-            id = val.trim_matches('"').trim_matches('\'').to_string();
+            id = val.trim_matches('"').trim_matches('\'').to_lowercase();
+        } else if let Some(val) = line.strip_prefix("ID_LIKE=") {
+            id_like = val.trim_matches('"').trim_matches('\'').to_lowercase();
         } else if let Some(val) = line.strip_prefix("PRETTY_NAME=") {
             pretty = val.trim_matches('"').trim_matches('\'').to_string();
         } else if let Some(val) = line.strip_prefix("NAME=") {
             name = val.trim_matches('"').trim_matches('\'').to_string();
         }
     }
+
+    let is_arch_based = id != "steamos"
+        && (id == "arch" || id_like.split_whitespace().any(|tok| tok == "arch"));
 
     let display = if !pretty.is_empty() {
         pretty
@@ -142,13 +149,13 @@ pub fn parse_os_release(content: &str) -> (String, String) {
     } else {
         "Linux".to_string()
     };
-    (id, display)
+    (id, display, is_arch_based)
 }
 
 pub fn detect_distro() -> DistroInfo {
-    let (id, name) = fs::read_to_string("/etc/os-release")
+    let (id, name, is_arch_based) = fs::read_to_string("/etc/os-release")
         .map(|s| parse_os_release(&s))
-        .unwrap_or_else(|_| (String::new(), "Linux".to_string()));
+        .unwrap_or_else(|_| (String::new(), "Linux".to_string(), false));
 
     let in_steamos_gaming_mode = id == "steamos"
         && Command::new("pgrep")
@@ -160,6 +167,7 @@ pub fn detect_distro() -> DistroInfo {
     DistroInfo {
         id,
         name,
+        is_arch_based,
         in_steamos_gaming_mode,
     }
 }
@@ -314,6 +322,75 @@ fn find_in_path(bin_name: &str) -> Option<PathBuf> {
         }
     }
     None
+}
+
+/// Returns true if Millennium Steam patcher/loader is detected on the system.
+fn has_millennium(steam_dir: &Path) -> bool {
+    if let Some(home) = std::env::var_os("HOME").map(PathBuf::from) {
+        if home.join(".millennium").exists() {
+            return true;
+        }
+    }
+    if Path::new("/usr/lib/millennium").exists()
+        || Path::new("/usr/share/millennium").exists()
+        || find_in_path("millennium").is_some()
+    {
+        return true;
+    }
+    let steam_sh = steam_dir.join("steam.sh");
+    if let Ok(content) = fs::read_to_string(&steam_sh) {
+        if content.to_lowercase().contains("millennium") {
+            return true;
+        }
+    }
+    false
+}
+
+/// Returns ordered (program, prefix_args, description) launcher candidates for rollback.
+/// When `prefer_direct_binary` is true (e.g. Arch-based distros or Millennium setups),
+/// `ubuntu12_32/steam` and `linux32/steam` are tried before `steam.sh` / system `steam`
+/// so wrapper/LD_PRELOAD hooks do not interfere with rollback flags.
+fn build_steam_launcher_candidates(
+    steam_dir: &Path,
+    prefer_direct_binary: bool,
+) -> Vec<(PathBuf, Vec<String>, String)> {
+    let mut out = Vec::new();
+    if is_flatpak_steam_dir(steam_dir) {
+        if let Some(flatpak) = find_in_path("flatpak") {
+            out.push((
+                flatpak,
+                vec!["run".to_string(), "com.valvesoftware.Steam".to_string()],
+                "flatpak run com.valvesoftware.Steam".to_string(),
+            ));
+            return out;
+        }
+    }
+
+    let ordered: [PathBuf; 4] = if prefer_direct_binary {
+        [
+            steam_dir.join("ubuntu12_32/steam"),
+            steam_dir.join("linux32/steam"),
+            steam_dir.join("steam.sh"),
+            find_in_path("steam").unwrap_or_default(),
+        ]
+    } else {
+        [
+            steam_dir.join("steam.sh"),
+            find_in_path("steam").unwrap_or_default(),
+            steam_dir.join("ubuntu12_32/steam"),
+            steam_dir.join("linux32/steam"),
+        ]
+    };
+
+    for bin in ordered {
+        if !bin.as_os_str().is_empty() && is_executable_file(&bin) {
+            let desc = bin.display().to_string();
+            if !out.iter().any(|(p, _, _): &(PathBuf, Vec<String>, String)| p == &bin) {
+                out.push((bin, Vec::new(), desc));
+            }
+        }
+    }
+    out
 }
 
 /// Builds a distro- and sandbox-aware Steam launch command.
@@ -680,46 +757,82 @@ pub fn rollback_to_manifest(
         log("WARNING: SteamOS Gaming Mode detected. Please run SteamRollbackr from Desktop Mode so Gamescope does not restart Steam during rollback.");
     }
 
+    let millennium_detected = has_millennium(steam_dir);
+    let prefer_direct_binary = distro.is_arch_based || millennium_detected;
+    if prefer_direct_binary {
+        log(&format!(
+            "Using direct Steam binary priority (Arch-based: {}, Millennium detected: {}).",
+            distro.is_arch_based, millennium_detected
+        ));
+    }
+
     kill_steam(log);
 
     log("Clearing any existing update locks before rollback...");
     unlock_updates(steam_dir, log)?;
     cleanup_conflicting_files(steam_dir, channel, log);
 
+    let candidates = build_steam_launcher_candidates(steam_dir, prefer_direct_binary);
+    if candidates.is_empty() {
+        return Err("Could not find executable steam launcher (steam.sh, steam, ubuntu12_32/steam, or linux32/steam)".to_string());
+    }
+
     log("Starting local manifest server for -overridepackageurl...");
     let server = ManifestServer::start(channel.filename(), manifest_content.to_string())?;
     let url = format!("http://127.0.0.1:{}", server.port());
     log(&format!("Local manifest server listening on {url}"));
 
-    let (mut cmd, launcher_desc) = build_steam_command(
-        steam_dir,
-        &[
-            "-forcemanifestsuffix",
-            channel.suffix(),
-            "-forcesteamupdate",
-            "-forcepackagedownload",
-            "-overridepackageurl",
-            &url,
-            "-exitsteam",
-        ],
-    )?;
+    let rollback_args = [
+        "-forcemanifestsuffix",
+        channel.suffix(),
+        "-forcesteamupdate",
+        "-forcepackagedownload",
+        "-overridepackageurl",
+        &url,
+        "-exitsteam",
+    ];
 
-    log(&format!(
-        "Running Steam rollback ({launcher_desc}) — this may take a minute while packages download..."
-    ));
+    let mut total_hits = 0usize;
+    let total_candidates = candidates.len();
+    for (idx, (bin, prefix_args, launcher_desc)) in candidates.into_iter().enumerate() {
+        log(&format!(
+            "Running Steam rollback ({launcher_desc}) — this may take a minute while packages download..."
+        ));
 
-    let status = cmd.status();
-    let hits = server.manifest_hits();
-    drop(server);
+        let mut cmd = Command::new(&bin);
+        cmd.args(&prefix_args);
+        cmd.args(rollback_args);
 
-    match status {
-        Ok(s) => log(&format!("Steam updater exited with status: {s} (manifest requests served: {hits})")),
-        Err(e) => {
-            return Err(format!("Failed to run Steam updater ({launcher_desc}): {e}"));
+        let hits_before = server.manifest_hits();
+        match cmd.status() {
+            Ok(s) => {
+                let hits_now = server.manifest_hits();
+                let delta = hits_now.saturating_sub(hits_before);
+                total_hits = hits_now;
+                log(&format!(
+                    "Steam updater exited with status: {s} (manifest requests served: {delta})"
+                ));
+                if delta > 0 {
+                    break;
+                }
+            }
+            Err(e) => {
+                log(&format!("Failed to run Steam updater ({launcher_desc}): {e}"));
+                if idx + 1 == total_candidates {
+                    drop(server);
+                    return Err(format!("Failed to run Steam updater ({launcher_desc}): {e}"));
+                }
+            }
+        }
+
+        if idx + 1 < total_candidates {
+            log("No manifest request received from that launcher; trying next fallback launcher...");
         }
     }
 
-    if hits == 0 {
+    drop(server);
+
+    if total_hits == 0 {
         return Err("Steam exited without requesting the rollback manifest from the local server. Rollback did not run (leaving package/ unlocked). Check Logs for details.".to_string());
     }
 
@@ -797,14 +910,45 @@ mod tests {
         let sample = "NAME=\"Arch Linux\"\nPRETTY_NAME=\"Arch Linux\"\nID=arch\n";
         assert_eq!(
             parse_os_release(sample),
-            ("arch".to_string(), "Arch Linux".to_string())
+            ("arch".to_string(), "Arch Linux".to_string(), true)
         );
 
-        let steamos = "NAME=\"SteamOS\"\nPRETTY_NAME=\"SteamOS 3.6\"\nID=\"steamos\"\n";
+        let cachy = "NAME=\"CachyOS\"\nPRETTY_NAME=\"CachyOS\"\nID=cachyos\nID_LIKE=arch\n";
+        assert_eq!(
+            parse_os_release(cachy),
+            ("cachyos".to_string(), "CachyOS".to_string(), true)
+        );
+
+        let steamos = "NAME=\"SteamOS\"\nPRETTY_NAME=\"SteamOS 3.6\"\nID=\"steamos\"\nID_LIKE=arch\n";
         assert_eq!(
             parse_os_release(steamos),
-            ("steamos".to_string(), "SteamOS 3.6".to_string())
+            ("steamos".to_string(), "SteamOS 3.6".to_string(), false)
         );
+    }
+
+    #[test]
+    fn test_launcher_candidate_priority() {
+        let tmp = std::env::temp_dir().join(format!("steamrollbackr_launch_{}", std::process::id()));
+        let _ = fs::remove_dir_all(&tmp);
+        fs::create_dir_all(tmp.join("ubuntu12_32")).unwrap();
+        fs::create_dir_all(tmp.join("linux32")).unwrap();
+        for rel in ["steam.sh", "ubuntu12_32/steam", "linux32/steam"] {
+            let p = tmp.join(rel);
+            fs::write(&p, "#!/bin/sh\n").unwrap();
+            let mut perms = fs::metadata(&p).unwrap().permissions();
+            perms.set_mode(0o755);
+            fs::set_permissions(&p, perms).unwrap();
+        }
+
+        let arch_order = build_steam_launcher_candidates(&tmp, true);
+        assert_eq!(arch_order[0].0, tmp.join("ubuntu12_32/steam"));
+        assert_eq!(arch_order[1].0, tmp.join("linux32/steam"));
+        assert_eq!(arch_order[2].0, tmp.join("steam.sh"));
+
+        let default_order = build_steam_launcher_candidates(&tmp, false);
+        assert_eq!(default_order[0].0, tmp.join("steam.sh"));
+
+        let _ = fs::remove_dir_all(&tmp);
     }
 
     #[test]
