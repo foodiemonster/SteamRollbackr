@@ -101,12 +101,67 @@ fn read_lumen_versions() -> LumenVersions {
 }
 
 #[derive(Debug, Clone)]
+pub struct DistroInfo {
+    pub id: String,
+    pub name: String,
+    pub in_steamos_gaming_mode: bool,
+}
+
+#[derive(Debug, Clone)]
 pub struct SteamStatus {
     pub steam_dir: Option<PathBuf>,
     pub is_flatpak: bool,
+    pub distro: DistroInfo,
     pub current_version: Option<ClientVersion>,
     pub lock_state: LockState,
     pub lumen_versions: LumenVersions,
+}
+
+pub fn parse_os_release(content: &str) -> (String, String) {
+    let mut id = String::new();
+    let mut pretty = String::new();
+    let mut name = String::new();
+
+    for line in content.lines() {
+        let line = line.trim();
+        if let Some(val) = line.strip_prefix("ID=") {
+            id = val.trim_matches('"').trim_matches('\'').to_string();
+        } else if let Some(val) = line.strip_prefix("PRETTY_NAME=") {
+            pretty = val.trim_matches('"').trim_matches('\'').to_string();
+        } else if let Some(val) = line.strip_prefix("NAME=") {
+            name = val.trim_matches('"').trim_matches('\'').to_string();
+        }
+    }
+
+    let display = if !pretty.is_empty() {
+        pretty
+    } else if !name.is_empty() {
+        name
+    } else if !id.is_empty() {
+        id.clone()
+    } else {
+        "Linux".to_string()
+    };
+    (id, display)
+}
+
+pub fn detect_distro() -> DistroInfo {
+    let (id, name) = fs::read_to_string("/etc/os-release")
+        .map(|s| parse_os_release(&s))
+        .unwrap_or_else(|_| (String::new(), "Linux".to_string()));
+
+    let in_steamos_gaming_mode = id == "steamos"
+        && Command::new("pgrep")
+            .args(["-x", "gamescope-session"])
+            .output()
+            .map(|o| o.status.success())
+            .unwrap_or(false);
+
+    DistroInfo {
+        id,
+        name,
+        in_steamos_gaming_mode,
+    }
 }
 
 /// Searches standard and Flatpak Steam locations in a distro-agnostic order.
@@ -212,16 +267,16 @@ pub fn inspect_steam_with_override(override_dir: Option<&Path>) -> SteamStatus {
         None => find_steam_dir(),
     };
     let lumen_versions = read_lumen_versions();
+    let distro = detect_distro();
     match steam_dir {
         Some(dir) => {
-            let is_flatpak = dir
-                .to_string_lossy()
-                .contains(".var/app/com.valvesoftware.Steam");
+            let is_flatpak = is_flatpak_steam_dir(&dir);
             let current_version = read_installed_version(&dir);
             let lock_state = check_lock_state(&dir);
             SteamStatus {
                 steam_dir: Some(dir),
                 is_flatpak,
+                distro,
                 current_version,
                 lock_state,
                 lumen_versions,
@@ -230,6 +285,7 @@ pub fn inspect_steam_with_override(override_dir: Option<&Path>) -> SteamStatus {
         None => SteamStatus {
             steam_dir: None,
             is_flatpak: false,
+            distro,
             current_version: None,
             lock_state: LockState::Unlocked,
             lumen_versions,
@@ -237,16 +293,56 @@ pub fn inspect_steam_with_override(override_dir: Option<&Path>) -> SteamStatus {
     }
 }
 
-fn find_steam_bin(steam_dir: &Path) -> Option<PathBuf> {
-    let ubuntu_bin = steam_dir.join("ubuntu12_32/steam");
-    if ubuntu_bin.is_file() {
-        return Some(ubuntu_bin);
-    }
-    let script_bin = steam_dir.join("steam.sh");
-    if script_bin.is_file() {
-        return Some(script_bin);
+fn is_flatpak_steam_dir(steam_dir: &Path) -> bool {
+    steam_dir
+        .to_string_lossy()
+        .contains(".var/app/com.valvesoftware.Steam")
+}
+
+fn is_executable_file(path: &Path) -> bool {
+    fs::metadata(path)
+        .map(|m| m.is_file() && (m.permissions().mode() & 0o111 != 0))
+        .unwrap_or(false)
+}
+
+fn find_in_path(bin_name: &str) -> Option<PathBuf> {
+    let path_var = std::env::var_os("PATH")?;
+    for dir in std::env::split_paths(&path_var) {
+        let candidate = dir.join(bin_name);
+        if is_executable_file(&candidate) {
+            return Some(candidate);
+        }
     }
     None
+}
+
+/// Builds a distro- and sandbox-aware Steam launch command.
+fn build_steam_command(steam_dir: &Path, extra_args: &[&str]) -> Result<(Command, String), String> {
+    if is_flatpak_steam_dir(steam_dir) {
+        if let Some(flatpak) = find_in_path("flatpak") {
+            let mut cmd = Command::new(&flatpak);
+            cmd.args(["run", "com.valvesoftware.Steam"]);
+            cmd.args(extra_args);
+            return Ok((cmd, "flatpak run com.valvesoftware.Steam".to_string()));
+        }
+    }
+
+    // Prefer steam.sh or system steam wrapper so Steam Runtime LD_LIBRARY_PATH is configured.
+    let candidates = [
+        steam_dir.join("steam.sh"),
+        find_in_path("steam").unwrap_or_default(),
+        steam_dir.join("ubuntu12_32/steam"),
+        steam_dir.join("linux32/steam"),
+    ];
+    for bin in candidates {
+        if !bin.as_os_str().is_empty() && is_executable_file(&bin) {
+            let mut cmd = Command::new(&bin);
+            cmd.args(extra_args);
+            return Ok((cmd, bin.display().to_string()));
+        }
+    }
+
+    Err("Could not find executable steam launcher (steam.sh, steam, ubuntu12_32/steam, or linux32/steam)".to_string())
 }
 
 fn set_package_writable(steam_dir: &Path, writable: bool) -> Result<(), String> {
@@ -359,17 +455,16 @@ pub fn unlock_updates(steam_dir: &Path, log: &mut dyn FnMut(&str)) -> Result<(),
 
 /// Unlocks Steam updates and runs the Steam updater to restore the latest official client.
 pub fn unlock_and_update_steam(steam_dir: &Path, log: &mut dyn FnMut(&str)) -> Result<(), String> {
-    let bin = find_steam_bin(steam_dir)
-        .ok_or_else(|| "Could not find steam binary (ubuntu12_32/steam or steam.sh)".to_string())?;
-
     kill_steam(log);
     unlock_updates(steam_dir, log)?;
     cleanup_conflicting_files(steam_dir, ManifestChannel::SteamRt64, log);
 
-    log("Updating Steam to the latest official release...");
-    let status = Command::new(&bin)
-        .args(["-forcemanifestsuffix", "steamrt64", "-forcesteamupdate", "-exitsteam"])
-        .status();
+    let (mut cmd, launcher_desc) = build_steam_command(
+        steam_dir,
+        &["-forcemanifestsuffix", "steamrt64", "-forcesteamupdate", "-exitsteam"],
+    )?;
+    log(&format!("Updating Steam to the latest official release via {launcher_desc}..."));
+    let status = cmd.status();
 
     match status {
         Ok(s) => log(&format!("Steam updater finished with status: {s}")),
@@ -383,16 +478,23 @@ pub fn unlock_and_update_steam(steam_dir: &Path, log: &mut dyn FnMut(&str)) -> R
 
 /// Restarts the Steam client cleanly.
 pub fn restart_steam(steam_dir: &Path, log: &mut dyn FnMut(&str)) -> Result<(), String> {
-    let bin = find_steam_bin(steam_dir)
-        .ok_or_else(|| "Could not find steam binary (ubuntu12_32/steam or steam.sh)".to_string())?;
-
     kill_steam(log);
-    log("Starting Steam...");
-    Command::new(&bin)
-        .spawn()
+    let (mut cmd, launcher_desc) = build_steam_command(steam_dir, &[])?;
+    log(&format!("Starting Steam via {launcher_desc}..."));
+    cmd.spawn()
         .map_err(|e| format!("Failed to start Steam: {e}"))?;
     log("Steam launched.");
     Ok(())
+}
+
+/// Checks whether a file begins with a 32-bit ELF header (`EI_CLASS == 1`).
+fn is_elf32(path: &Path) -> bool {
+    use std::io::Read;
+    let Ok(mut f) = fs::File::open(path) else {
+        return false;
+    };
+    let mut hdr = [0u8; 5];
+    f.read_exact(&mut hdr).is_ok() && hdr == [0x7F, b'E', b'L', b'F', 1]
 }
 
 fn find_i386_libcrypto(dir: &Path) -> Option<PathBuf> {
@@ -409,6 +511,7 @@ fn find_i386_libcrypto(dir: &Path) -> Option<PathBuf> {
                 .and_then(|p| p.file_name())
                 .and_then(|n| n.to_str())
                 == Some("i386-linux-gnu")
+            && is_elf32(&path)
         {
             return Some(path);
         }
@@ -452,7 +555,7 @@ fn collect_steam_common_dirs(steam_dir: &Path) -> Vec<PathBuf> {
     common_dirs
 }
 
-/// Copies 32-bit libcrypto.so.3 from SteamLinuxRuntime across any Steam library folder into ubuntu12_32/ and sets +x.
+/// Copies 32-bit libcrypto.so.3 from SteamLinuxRuntime or host 32-bit OpenSSL into ubuntu12_32/ and sets +x.
 pub fn install_libcrypto3(steam_dir: &Path, log: &mut dyn FnMut(&str)) -> Result<(), String> {
     let common_dirs = collect_steam_common_dirs(steam_dir);
     let mut found = None;
@@ -470,8 +573,24 @@ pub fn install_libcrypto3(steam_dir: &Path, log: &mut dyn FnMut(&str)) -> Result
         }
     }
 
+    if found.is_none() {
+        let host_candidates = [
+            "/usr/lib32/libcrypto.so.3",
+            "/usr/lib/i386-linux-gnu/libcrypto.so.3",
+            "/usr/lib/libcrypto.so.3",
+        ];
+        for cand in host_candidates {
+            let p = Path::new(cand);
+            if p.is_file() && is_elf32(p) {
+                log(&format!("Found 32-bit system libcrypto.so.3 at {cand}"));
+                found = Some(p.to_path_buf());
+                break;
+            }
+        }
+    }
+
     let src = found.ok_or_else(|| {
-        "Could not find i386-linux-gnu/libcrypto.so.3 in any Steam library folder. Open Steam and install \"Steam Linux Runtime\" (or any Proton game) first, then try again.".to_string()
+        "Could not find 32-bit libcrypto.so.3 in any Steam library folder or host 32-bit library directory. Install \"Steam Linux Runtime\" in Steam or 32-bit OpenSSL (e.g. lib32-openssl / libssl3:i386 / openssl-libs.i686).".to_string()
     })?;
     log(&format!("Found: {}", src.display()));
 
@@ -556,13 +675,15 @@ pub fn rollback_to_manifest(
     manifest_content: &str,
     log: &mut dyn FnMut(&str),
 ) -> Result<(), String> {
-    let bin = find_steam_bin(steam_dir)
-        .ok_or_else(|| "Could not find steam binary (ubuntu12_32/steam or steam.sh)".to_string())?;
+    let distro = detect_distro();
+    if distro.in_steamos_gaming_mode {
+        log("WARNING: SteamOS Gaming Mode detected. Please run SteamRollbackr from Desktop Mode so Gamescope does not restart Steam during rollback.");
+    }
 
     kill_steam(log);
 
-    log("Ensuring package/ is writable...");
-    set_package_writable(steam_dir, true)?;
+    log("Clearing any existing update locks before rollback...");
+    unlock_updates(steam_dir, log)?;
     cleanup_conflicting_files(steam_dir, channel, log);
 
     log("Starting local manifest server for -overridepackageurl...");
@@ -570,13 +691,9 @@ pub fn rollback_to_manifest(
     let url = format!("http://127.0.0.1:{}", server.port());
     log(&format!("Local manifest server listening on {url}"));
 
-    log(&format!(
-        "Running Steam rollback ({}) — this may take a minute while packages download...",
-        bin.display()
-    ));
-
-    let status = Command::new(&bin)
-        .args([
+    let (mut cmd, launcher_desc) = build_steam_command(
+        steam_dir,
+        &[
             "-forcemanifestsuffix",
             channel.suffix(),
             "-forcesteamupdate",
@@ -584,14 +701,26 @@ pub fn rollback_to_manifest(
             "-overridepackageurl",
             &url,
             "-exitsteam",
-        ])
-        .status();
+        ],
+    )?;
 
+    log(&format!(
+        "Running Steam rollback ({launcher_desc}) — this may take a minute while packages download..."
+    ));
+
+    let status = cmd.status();
+    let hits = server.manifest_hits();
     drop(server);
 
     match status {
-        Ok(s) => log(&format!("Steam updater exited with status: {s}")),
-        Err(e) => log(&format!("Steam updater warning: {e} (continuing to lock)")),
+        Ok(s) => log(&format!("Steam updater exited with status: {s} (manifest requests served: {hits})")),
+        Err(e) => {
+            return Err(format!("Failed to run Steam updater ({launcher_desc}): {e}"));
+        }
+    }
+
+    if hits == 0 {
+        return Err("Steam exited without requesting the rollback manifest from the local server. Rollback did not run (leaving package/ unlocked). Check Logs for details.".to_string());
     }
 
     lock_only(steam_dir, log)?;
@@ -661,6 +790,31 @@ mod tests {
                 PathBuf::from("/run/media/mmcblk0p1/SteamLibrary"),
             ]
         );
+    }
+
+    #[test]
+    fn test_parse_os_release() {
+        let sample = "NAME=\"Arch Linux\"\nPRETTY_NAME=\"Arch Linux\"\nID=arch\n";
+        assert_eq!(
+            parse_os_release(sample),
+            ("arch".to_string(), "Arch Linux".to_string())
+        );
+
+        let steamos = "NAME=\"SteamOS\"\nPRETTY_NAME=\"SteamOS 3.6\"\nID=\"steamos\"\n";
+        assert_eq!(
+            parse_os_release(steamos),
+            ("steamos".to_string(), "SteamOS 3.6".to_string())
+        );
+    }
+
+    #[test]
+    fn test_is_elf32() {
+        let tmp = std::env::temp_dir().join(format!("steamrollbackr_elf_{}", std::process::id()));
+        fs::write(&tmp, [0x7F, b'E', b'L', b'F', 1, 1, 1, 0]).unwrap();
+        assert!(is_elf32(&tmp));
+        fs::write(&tmp, [0x7F, b'E', b'L', b'F', 2, 1, 1, 0]).unwrap();
+        assert!(!is_elf32(&tmp));
+        let _ = fs::remove_file(&tmp);
     }
 }
 

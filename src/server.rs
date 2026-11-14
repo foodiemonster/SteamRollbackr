@@ -1,4 +1,4 @@
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::Arc;
 use std::thread::{self, JoinHandle};
 use std::time::Duration;
@@ -7,6 +7,7 @@ use tiny_http::{Header, Response, Server};
 pub struct ManifestServer {
     port: u16,
     stop: Arc<AtomicBool>,
+    manifest_hits: Arc<AtomicUsize>,
     handle: Option<JoinHandle<()>>,
 }
 
@@ -22,6 +23,8 @@ impl ManifestServer {
 
         let stop = Arc::new(AtomicBool::new(false));
         let stop_flag = Arc::clone(&stop);
+        let manifest_hits = Arc::new(AtomicUsize::new(0));
+        let hits_counter = Arc::clone(&manifest_hits);
 
         let handle = thread::spawn(move || {
             while !stop_flag.load(Ordering::Relaxed) {
@@ -34,6 +37,7 @@ impl ManifestServer {
                             || trimmed == format!("{manifest_name}.manifest")
                             || trimmed == format!("client/{manifest_name}")
                         {
+                            hits_counter.fetch_add(1, Ordering::Relaxed);
                             let resp = Response::from_string(manifest_content.clone())
                                 .with_status_code(200);
                             let _ = req.respond(resp);
@@ -58,12 +62,17 @@ impl ManifestServer {
         Ok(Self {
             port,
             stop,
+            manifest_hits,
             handle: Some(handle),
         })
     }
 
     pub fn port(&self) -> u16 {
         self.port
+    }
+
+    pub fn manifest_hits(&self) -> usize {
+        self.manifest_hits.load(Ordering::Relaxed)
     }
 }
 

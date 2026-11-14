@@ -1220,6 +1220,22 @@ impl SteamRollbackrApp {
                         Color32::from_rgb(245, 150, 150),
                     ),
                 }
+                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                    pill_badge(
+                        ui,
+                        &self.status.distro.name,
+                        Color32::from_rgb(48, 52, 60),
+                        Color32::from_rgb(200, 206, 216),
+                    );
+                    if self.status.distro.in_steamos_gaming_mode {
+                        pill_badge(
+                            ui,
+                            "Gaming Mode",
+                            Color32::from_rgb(90, 66, 24),
+                            Color32::from_rgb(250, 212, 120),
+                        );
+                    }
+                });
             });
 
             ui.add_space(8.0);
